@@ -1,0 +1,8 @@
+# ESP-IDF build outputs
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+
+# Merged images (SPEC 8)
+builds/

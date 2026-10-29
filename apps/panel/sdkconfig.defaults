@@ -1,0 +1,2 @@
+# Development profile (ADR 0004): no security features, no eFuse burning.
+CONFIG_ESP32_REV_MIN_3=y
