@@ -1,2 +1,6 @@
 # Development profile (ADR 0004): no security features, no eFuse burning.
 CONFIG_ESP32_REV_MIN_3=y
+
+# espnow_sec uses protocomm security v1, which is off by default since ESP-IDF 6.x.
+# Same setting as every espressif/esp-now example's sdkconfig.defaults.
+CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y

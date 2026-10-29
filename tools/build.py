@@ -31,7 +31,8 @@ def idf_py(project_dir: Path, *args: str) -> None:
 def build_role(role: str, timestamp: str) -> Path:
     project_dir = REPO_ROOT / "apps" / role
     output = OUTPUT_DIR / f"{role}_{timestamp}.bin"
-    idf_py(project_dir, "build")
+    # idf.py has ccache disabled by default; enable it explicitly instead of relying on the shell profile.
+    idf_py(project_dir, "--ccache", "build")
     # Raw format pads gaps with 0xFF, so flashing at 0x0 also erases the NVS region.
     idf_py(project_dir, "merge-bin", "-o", str(output))
     return output

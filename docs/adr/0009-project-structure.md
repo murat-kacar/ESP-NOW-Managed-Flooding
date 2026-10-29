@@ -26,4 +26,6 @@ docs/              Şartname ve ADR'ler
 - Her rol ayrı derlenir: `idf.py -C apps/panel build`, `idf.py -C apps/apartment build`.
 - Dağıtım çıktısı rol başına tek dosyadır: `python tools/build.py` → `builds/<rol>_YYYY-MM-DD_HH-MM-SS.bin` (offset 0x0).
   Betik yalnızca resmi `idf.py build` ve `idf.py merge-bin` komutlarını çağırır.
-- espressif/esp-now 2.5.3, IDF 6.0 derleme düzeltmesi içerir; IDF 6.1 ile uyumu ilk derlemede doğrulanacak.
+- espressif/esp-now 2.5.3, IDF 6.1 ile derleniyor (2026-10-29). Koşul: `CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y`
+  (IDF 6.x'te varsayılan kapalı; esp-now'ın tüm örnekleri bu ayarı açar).
+- İlk derlemede uygulama imajı 0xbca50 bayt; varsayılan 1 MB uygulama bölümünün %26'sı boş.
