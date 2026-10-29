@@ -214,6 +214,8 @@ Eşleştirme mesajları espnow_sec el sıkışmasıyla değiştirildi; ayrı opc
 | Flaşlama | Birleşik imaj, `0x0` adresinden (`builds/<rol>_YYYY-MM-DD_HH-MM-SS.bin`) | Ayrıca tanımlanacak |
 
 - Geliştirme aşamasında hiçbir eFuse yakılmaz; her değişiklik geri alınabilir.
+- Birleşik imaj `tools/build.py` ile üretilir: her rol için `idf.py build` ve `idf.py merge-bin` (raw format) çalıştırılır.
+  esptool raw formatta dosyalar arasındaki boşlukları `0xFF` ile doldurur (esptool 5.6.0 kaynak kodu); bu yüzden `0x0`'dan flaşlama NVS bölgesini de siler.
 - OTA: `espressif/esp-now` OTA modülü. Üretimde imzalı imaj.
 - Bölüm tablosu: OTA bölümleri, fabrika NVS bölümü (`mfg_gen.py`), üretimde `nvs_keys`.
 

@@ -6,3 +6,6 @@ managed_components/
 
 # Merged images (SPEC 8)
 builds/
+
+# Python
+__pycache__/
