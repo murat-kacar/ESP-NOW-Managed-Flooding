@@ -23,7 +23,6 @@ void pairing_on_hello(const uint8_t src[6], db_opcode_t opcode);
 bool pairing_is_expected_panel(const uint8_t mac[6]);
 
 /**
- * @brief Close the window. Without success, a key received in the handshake is erased so the module stays
- * unpaired and can pair again.
+ * @brief Close the window. Without success, any stored key is erased: an unpaired module holds no key.
  */
 void pairing_finish(bool success);

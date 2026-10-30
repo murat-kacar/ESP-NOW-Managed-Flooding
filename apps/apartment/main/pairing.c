@@ -151,7 +151,6 @@ void pairing_finish(bool success)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool was_active = s_active;
-    bool handshake_done = s_handshake_done;
     s_active = false;
     s_found = false;
     s_handshake_done = false;
@@ -166,8 +165,9 @@ void pairing_finish(bool success)
     esp_timer_stop(s_window_timer);
     espnow_sec_responder_stop();
     db_status_led_stop(DB_LED_PAIRING_MODE);
-    if (!success && handshake_done) {
-        /* A configured responder ignores new handshakes, so drop the key from the incomplete pairing. */
+    if (!success) {
+        /* An unpaired module holds no key. The responder stores the key of whichever initiator completed the
+         * handshake first, even one that is not the panel that answered our HELLO, so erase it unconditionally. */
         db_net_erase_key();
     }
 }

@@ -187,6 +187,11 @@ void app_main(void)
         ESP_ERROR_CHECK_WITHOUT_ABORT(identity_erase());
         s_paired = false;
     }
+    if (!s_paired && db_net_has_key()) {
+        /* Left by a pairing window cut short by a power loss: an unpaired module holds no key. */
+        ESP_LOGW(TAG, "key without an identity: erasing the key");
+        ESP_ERROR_CHECK_WITHOUT_ABORT(db_net_erase_key());
+    }
     if (s_paired) {
         ESP_ERROR_CHECK(db_net_set_channel(s_identity.channel));
         ESP_ERROR_CHECK(db_status_led_start(DB_LED_PAIRED_IDLE));

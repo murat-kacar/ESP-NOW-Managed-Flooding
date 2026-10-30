@@ -84,7 +84,8 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
 - Pairing button (only when unpaired): responder on; on each candidate channel it broadcasts `PAIR_HELLO` and waits
   `DB_CHANNEL_DWELL_MS` for `PAIR_HELLO_ACK`. The first answer locks the channel and the panel MAC; it then accepts
   `ESP_EVENT_ESPNOW_SEC_OK` and `PAIR_CONFIG` only from that panel.
-  A window that ends after the handshake but without configuration erases the key.
+  An unpaired module holds no key: a window that ends without configuration erases any stored key (the responder
+  stores the key of whichever initiator completes first), and a key found at boot without an identity is erased.
 - RING is accepted only from the stored panel MAC for the stored apartment number and session.
 - Reset button: erases identity, key and peer counters, then restarts.
 
