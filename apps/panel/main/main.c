@@ -251,7 +251,8 @@ void app_main(void)
     ESP_ERROR_CHECK(codes_init());
     ESP_ERROR_CHECK(registry_init());
     ESP_ERROR_CHECK(setup_channel());
-    ESP_ERROR_CHECK(db_proto_init(on_message));
+    ESP_ERROR_CHECK(pairing_init());
+    ESP_ERROR_CHECK(db_proto_init(on_message, pairing_on_hello));
     ESP_ERROR_CHECK(input_init(on_command, on_input_timeout));
     ESP_ERROR_CHECK(xTaskCreate(app_task, "panel", APP_TASK_STACK, NULL, APP_TASK_PRIO, NULL) == pdPASS
                     ? ESP_OK : ESP_ERR_NO_MEM);

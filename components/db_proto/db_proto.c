@@ -6,12 +6,15 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_wifi.h"
 #include "espnow.h"
+#include "espnow_security.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "psa/crypto.h"
 
 static const char *TAG = "db_proto";
 
@@ -23,9 +26,29 @@ static const char *TAG = "db_proto";
 #define TASK_PRIORITY    5
 #define SEND_TIMEOUT_MS  1000  /* maximum time espnow_send() may block */
 
+#define AUTH_LABEL       "doorbell message auth"
+#define AUTH_KEY_LEN     32
+#define AUTH_ALG         PSA_ALG_TRUNCATED_MAC(PSA_ALG_HMAC(PSA_ALG_SHA_256), DB_TAG_LEN)
+
+/* Authenticated message on air. */
+typedef struct __attribute__((packed)) {
+    db_msg_t msg;
+    uint8_t tag[DB_TAG_LEN];
+} auth_frame_t;
+
+/* Pairing discovery frame on air: plaintext, carries nothing secret. */
+typedef struct __attribute__((packed)) {
+    uint8_t version;
+    uint8_t opcode;
+} hello_frame_t;
+
 typedef struct {
     uint8_t src[DB_MAC_LEN];
-    db_msg_t msg;
+    size_t size;
+    union {
+        auth_frame_t auth;
+        hello_frame_t hello;
+    } frame;
 } rx_item_t;
 
 typedef struct {
@@ -37,6 +60,8 @@ typedef struct {
 } pending_request_t;
 
 static db_proto_handler_t s_handler;
+static db_proto_hello_handler_t s_hello_handler;
+static uint8_t s_own_mac[DB_MAC_LEN];
 static QueueHandle_t s_rx_queue;
 static SemaphoreHandle_t s_lock;          /* counters and pending request */
 static SemaphoreHandle_t s_request_lock;  /* one request at a time */
@@ -56,6 +81,87 @@ static const espnow_frame_head_t s_frame = {
     .forward_ttl = CONFIG_DB_FORWARD_TTL,
     .forward_rssi = CONFIG_DB_FORWARD_RSSI,
 };
+
+/* Discovery happens next to the panel (ADR 0007): plaintext and not forwarded. */
+static const espnow_frame_head_t s_hello_frame = {
+    .channel = ESPNOW_CHANNEL_CURRENT,
+    .broadcast = true,
+    .retransmit_count = CONFIG_DB_RETRANSMIT_COUNT,
+    .forward_ttl = 0,
+};
+
+/* Import a 32-byte HMAC-SHA256 key for the given algorithm. */
+static esp_err_t import_hmac_key(const uint8_t *key, psa_algorithm_t alg, psa_key_usage_t usage, mbedtls_svc_key_id_t *id)
+{
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attributes, AUTH_KEY_LEN * 8);
+    psa_set_key_usage_flags(&attributes, usage);
+    psa_set_key_algorithm(&attributes, alg);
+    return psa_import_key(&attributes, key, AUTH_KEY_LEN, id) == PSA_SUCCESS ? ESP_OK : ESP_FAIL;
+}
+
+/* K_auth = HKDF-Expand(app key, AUTH_LABEL, 32) = HMAC-SHA256(app key, AUTH_LABEL || 0x01) (RFC 5869, one block). */
+static esp_err_t derive_auth_key(mbedtls_svc_key_id_t *auth_key)
+{
+    uint8_t app_key[APP_KEY_LEN];
+    if (espnow_get_key(app_key) != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;  /* not paired yet */
+    }
+    _Static_assert(APP_KEY_LEN == AUTH_KEY_LEN, "the esp-now application key is used as the HKDF PRK");
+    mbedtls_svc_key_id_t prk = 0;
+    esp_err_t err = import_hmac_key(app_key, PSA_ALG_HMAC(PSA_ALG_SHA_256), PSA_KEY_USAGE_SIGN_MESSAGE, &prk);
+    memset(app_key, 0, sizeof(app_key));
+    if (err != ESP_OK) {
+        return err;
+    }
+    static const uint8_t info[] = AUTH_LABEL "\x01";
+    uint8_t okm[AUTH_KEY_LEN];
+    size_t okm_len = 0;
+    psa_status_t status = psa_mac_compute(prk, PSA_ALG_HMAC(PSA_ALG_SHA_256), info, sizeof(info) - 1,
+                                          okm, sizeof(okm), &okm_len);
+    psa_destroy_key(prk);
+    if (status != PSA_SUCCESS || okm_len != sizeof(okm)) {
+        return ESP_FAIL;
+    }
+    err = import_hmac_key(okm, AUTH_ALG, PSA_KEY_USAGE_SIGN_MESSAGE | PSA_KEY_USAGE_VERIFY_MESSAGE, auth_key);
+    memset(okm, 0, sizeof(okm));
+    return err;
+}
+
+static void auth_input(const uint8_t src[DB_MAC_LEN], const uint8_t dest[DB_MAC_LEN], const db_msg_t *msg,
+                       uint8_t out[2 * DB_MAC_LEN + sizeof(db_msg_t)])
+{
+    memcpy(out, src, DB_MAC_LEN);
+    memcpy(out + DB_MAC_LEN, dest, DB_MAC_LEN);
+    memcpy(out + 2 * DB_MAC_LEN, msg, sizeof(*msg));
+}
+
+static esp_err_t sign(const uint8_t dest[DB_MAC_LEN], auth_frame_t *frame)
+{
+    mbedtls_svc_key_id_t key = 0;
+    ESP_RETURN_ON_ERROR(derive_auth_key(&key), TAG, "no authentication key");
+    uint8_t input[2 * DB_MAC_LEN + sizeof(db_msg_t)];
+    auth_input(s_own_mac, dest, &frame->msg, input);
+    size_t tag_len = 0;
+    psa_status_t status = psa_mac_compute(key, AUTH_ALG, input, sizeof(input), frame->tag, sizeof(frame->tag),
+                                          &tag_len);
+    psa_destroy_key(key);
+    return status == PSA_SUCCESS && tag_len == DB_TAG_LEN ? ESP_OK : ESP_FAIL;
+}
+
+static bool verify(const uint8_t src[DB_MAC_LEN], const auth_frame_t *frame)
+{
+    mbedtls_svc_key_id_t key = 0;
+    if (derive_auth_key(&key) != ESP_OK) {
+        return false;
+    }
+    uint8_t input[2 * DB_MAC_LEN + sizeof(db_msg_t)];
+    auth_input(src, s_own_mac, &frame->msg, input);
+    psa_status_t status = psa_mac_verify(key, AUTH_ALG, input, sizeof(input), frame->tag, DB_TAG_LEN);
+    psa_destroy_key(key);
+    return status == PSA_SUCCESS;  /* psa_mac_verify compares in constant time */
+}
 
 static bool is_ack(uint8_t opcode)
 {
@@ -122,35 +228,44 @@ static esp_err_t next_counter(uint32_t *out)
     return err;
 }
 
-static esp_err_t raw_send(const uint8_t dest[DB_MAC_LEN], const db_msg_t *msg)
+/* Sign and send; the frame (message and tag) is identical on every retry. */
+static esp_err_t raw_send(const uint8_t dest[DB_MAC_LEN], const auth_frame_t *frame)
 {
-    return espnow_send(ESPNOW_DATA_TYPE_DATA, dest, msg, sizeof(*msg), &s_frame, pdMS_TO_TICKS(SEND_TIMEOUT_MS));
+    return espnow_send(ESPNOW_DATA_TYPE_DATA, dest, frame, sizeof(*frame), &s_frame, pdMS_TO_TICKS(SEND_TIMEOUT_MS));
 }
 
 /* Runs in the esp-now task: copy and hand over to the protocol task (SPEC 7.1). */
 static esp_err_t on_espnow_data(uint8_t *src_addr, void *data, size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
 {
-    if (size != sizeof(db_msg_t)) {
+    if (size != sizeof(auth_frame_t) && size != sizeof(hello_frame_t)) {
         return ESP_OK;
     }
-    rx_item_t item;
+    rx_item_t item = { .size = size };
     memcpy(item.src, src_addr, DB_MAC_LEN);
-    memcpy(&item.msg, data, sizeof(item.msg));
+    memcpy(&item.frame, data, size);
     if (xQueueSend(s_rx_queue, &item, 0) != pdTRUE) {
         ESP_LOGW(TAG, "receive queue full, message dropped");
     }
     return ESP_OK;
 }
 
-static void handle_ack(const rx_item_t *item)
+static void handle_ack(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool expected = s_pending.active && s_pending.ack_opcode == item->msg.opcode &&
-                    s_pending.session == item->msg.session && s_pending.counter == item->msg.ack_counter &&
-                    memcmp(s_pending.dest, item->src, DB_MAC_LEN) == 0;
+    bool expected = s_pending.active && s_pending.ack_opcode == msg->opcode &&
+                    s_pending.session == msg->session && s_pending.counter == msg->ack_counter &&
+                    memcmp(s_pending.dest, src, DB_MAC_LEN) == 0;
     xSemaphoreGive(s_lock);
-    if (expected && db_proto_check_counter(item->src, item->msg.counter) == DB_REPLAY_NEW) {
+    if (expected && db_proto_check_counter(src, msg->counter) == DB_REPLAY_NEW) {
         xSemaphoreGive(s_ack);
+    }
+}
+
+static void handle_hello(const uint8_t src[DB_MAC_LEN], const hello_frame_t *hello)
+{
+    if (hello->version == DB_PROTO_VERSION && s_hello_handler &&
+            (hello->opcode == DB_OP_PAIR_HELLO || hello->opcode == DB_OP_PAIR_HELLO_ACK)) {
+        s_hello_handler(src, (db_opcode_t)hello->opcode);
     }
 }
 
@@ -161,23 +276,35 @@ static void protocol_task(void *arg)
         if (xQueueReceive(s_rx_queue, &item, portMAX_DELAY) != pdTRUE) {
             continue;
         }
-        if (item.msg.version != DB_PROTO_VERSION) {
-            ESP_LOGW(TAG, "message version %u ignored", item.msg.version);
+        if (item.size == sizeof(hello_frame_t)) {
+            handle_hello(item.src, &item.frame.hello);
             continue;
         }
-        if (is_ack(item.msg.opcode)) {
-            handle_ack(&item);
-        } else {
-            s_handler(item.src, &item.msg);
+        const db_msg_t *msg = &item.frame.auth.msg;
+        if (!verify(item.src, &item.frame.auth)) {
+            ESP_LOGW(TAG, "message without a valid authentication tag dropped");
+            continue;
+        }
+        if (msg->version != DB_PROTO_VERSION) {
+            ESP_LOGW(TAG, "message version %u ignored", msg->version);
+            continue;
+        }
+        if (is_ack(msg->opcode)) {
+            handle_ack(item.src, msg);
+        } else if (msg->opcode != DB_OP_PAIR_HELLO && msg->opcode != DB_OP_PAIR_HELLO_ACK) {
+            s_handler(item.src, msg);
         }
     }
 }
 
-esp_err_t db_proto_init(db_proto_handler_t handler)
+esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_hello_handler_t hello_handler)
 {
     ESP_RETURN_ON_FALSE(handler != NULL, ESP_ERR_INVALID_ARG, TAG, "handler is required");
     ESP_RETURN_ON_FALSE(s_rx_queue == NULL, ESP_ERR_INVALID_STATE, TAG, "already initialised");
+    ESP_RETURN_ON_FALSE(psa_crypto_init() == PSA_SUCCESS, ESP_FAIL, TAG, "psa_crypto_init failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_get_mac(WIFI_IF_STA, s_own_mac), TAG, "reading the MAC failed");
     s_handler = handler;
+    s_hello_handler = hello_handler;
     s_lock = xSemaphoreCreateMutex();
     s_request_lock = xSemaphoreCreateMutex();
     s_ack = xSemaphoreCreateBinary();
@@ -199,7 +326,18 @@ esp_err_t db_proto_send(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg)
     ESP_RETURN_ON_ERROR(next_counter(&counter), TAG, "counter reservation failed");
     msg->version = DB_PROTO_VERSION;
     msg->counter = counter;
-    return raw_send(dest, msg);
+    auth_frame_t frame = { .msg = *msg };
+    ESP_RETURN_ON_ERROR(sign(dest, &frame), TAG, "signing failed");
+    return raw_send(dest, &frame);
+}
+
+esp_err_t db_proto_send_hello(const uint8_t dest[DB_MAC_LEN], db_opcode_t opcode)
+{
+    ESP_RETURN_ON_FALSE(opcode == DB_OP_PAIR_HELLO || opcode == DB_OP_PAIR_HELLO_ACK, ESP_ERR_INVALID_ARG, TAG,
+                        "not a discovery opcode");
+    const hello_frame_t hello = { .version = DB_PROTO_VERSION, .opcode = opcode };
+    return espnow_send(ESPNOW_DATA_TYPE_DATA, dest, &hello, sizeof(hello), &s_hello_frame,
+                       pdMS_TO_TICKS(SEND_TIMEOUT_MS));
 }
 
 esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, const db_msg_t *request)
@@ -216,11 +354,16 @@ esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, c
 esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opcode_t ack_opcode, int retries)
 {
     xSemaphoreTake(s_request_lock, portMAX_DELAY);
-    uint32_t counter;  /* db_msg_t is packed: no pointers to its members */
+    uint32_t counter = 0;  /* db_msg_t is packed: no pointers to its members */
+    auth_frame_t frame;
     esp_err_t err = next_counter(&counter);
     if (err == ESP_OK) {
         msg->version = DB_PROTO_VERSION;
         msg->counter = counter;
+        frame = (auth_frame_t) { .msg = *msg };
+        err = sign(dest, &frame);
+    }
+    if (err == ESP_OK) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_pending = (pending_request_t) {
             .active = true, .ack_opcode = ack_opcode, .session = msg->session, .counter = counter,
@@ -231,7 +374,7 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
 
         err = ESP_ERR_TIMEOUT;
         for (int attempt = 0; attempt <= retries && err != ESP_OK; attempt++) {
-            esp_err_t sent = raw_send(dest, msg);  /* same counter on every attempt */
+            esp_err_t sent = raw_send(dest, &frame);  /* same counter and tag on every attempt */
             if (sent != ESP_OK) {
                 ESP_LOGW(TAG, "send failed: %s", esp_err_to_name(sent));
             }

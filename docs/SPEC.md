@@ -120,8 +120,8 @@ Pairing is done **next to the panel**. The espnow_sec key exchange only works wi
    ```text
    * <admin_code> * 1 * <apartment_no> #
    ```
-   The panel LED shows a repeating double flash; a 20 s pairing window opens. The panel stays on its own channel and scans with `espnow_sec_initiator_scan` during the window.
-2. **At the module (next to the panel):** the installer holds the hidden pairing button (GPIO 18) for 7–12 s and releases it. The module starts as an espnow_sec responder and listens on channels 1, 6 and 11 in turn.
+   The panel LED shows a repeating double flash; a 20 s pairing window opens. The panel stays on its own channel and waits for an unpaired module's HELLO during the window.
+2. **At the module (next to the panel):** the installer holds the hidden pairing button (GPIO 18) for 7–12 s and releases it. The module starts as an espnow_sec responder and sends a HELLO on channels 1, 6 and 11 in turn until the panel answers.
 3. **Panel scan result:**
    - Exactly 1 unpaired module found: the espnow_sec handshake runs; then the apartment number and channel are sent encrypted to the module, which stores them in NVS.
    - More than one unpaired module found: pairing is cancelled and the panel shows an error.
@@ -170,6 +170,8 @@ typedef enum {
     DB_OP_OPEN_DOOR_ACK   = 4,  // Panel -> Apartment
     DB_OP_PAIR_CONFIG     = 5,  // Panel -> Apartment, after the espnow_sec handshake
     DB_OP_PAIR_CONFIG_ACK = 6,  // Apartment -> Panel
+    DB_OP_PAIR_HELLO      = 7,  // Unpaired module broadcast; plaintext, single hop, 2 bytes
+    DB_OP_PAIR_HELLO_ACK  = 8,  // Panel -> module; plaintext, single hop, 2 bytes
 } db_opcode_t;
 
 typedef struct __attribute__((packed)) {
@@ -182,6 +184,10 @@ typedef struct __attribute__((packed)) {
     uint32_t ack_counter;  // ACKs: counter of the acknowledged request
 } db_msg_t;
 ```
+
+Every message is followed by a 16-byte HMAC-SHA256 tag over source MAC, destination MAC and message, with a key
+derived from the application key (32-byte frame). esp-now also delivers unencrypted frames to the application, so
+frames without a valid tag are dropped. HELLO frames carry no tag and are only used to find the channel.
 
 The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apartment number and channel
 (`components/db_proto`, [ADR 0012](adr/0012-protocol-and-application-logic.md)).
@@ -236,7 +242,7 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
 |---|---|---|
 | 1 | espnow_sec handshake is single-hop | Bench test |
 | 2 | ~~Whether the espnow_sec PoP parameter accepts NULL~~ — No (`ESP_PARAM_CHECK`); fixed non-secret PoP used (ADR 0012) | Source code (done) |
-| 3 | Dwell time per channel during channel hopping (3000 ms > one 2.5 s scan) | Bench test |
+| 3 | Dwell time per channel while the module waits for HELLO_ACK (proposed 500 ms) | Bench test |
 | 4 | Whether packets encrypted with a different key are forwarded — Yes per source code (forwarded before decryption) | Bench test |
 | 5 | ~~How the espnow_sec application key is generated~~ — `esp_fill_random()` on the panel, as in the esp-now security example | Source code (done) |
 | 6 | End-to-end latency and ACK timeout | Field measurement |

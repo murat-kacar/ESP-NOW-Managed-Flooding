@@ -14,22 +14,64 @@
 #include "espnow_security_handshake.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 static const char *TAG = "pairing";
 
-static SemaphoreHandle_t s_lock;
-static esp_timer_handle_t s_hop_timer;
-static esp_timer_handle_t s_window_timer;
-static bool s_active;
-static bool s_handshake_done;
-static uint8_t s_panel_mac[6];
-static uint8_t s_channels[DB_CHANNEL_CANDIDATE_COUNT];
-static int s_channel_index;
+#define DISCOVERY_TASK_STACK 3072
+#define DISCOVERY_TASK_PRIO  4
 
-static void hop(void *arg)
+static const uint8_t s_broadcast[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+
+static SemaphoreHandle_t s_lock;
+static esp_timer_handle_t s_window_timer;
+static TaskHandle_t s_discovery_task;
+static bool s_active;
+static bool s_found;            /* the panel answered our HELLO: stay on this channel */
+static bool s_handshake_done;
+static uint8_t s_panel_mac[6];  /* from HELLO_ACK, confirmed by ESP_EVENT_ESPNOW_SEC_OK */
+static uint8_t s_channels[DB_CHANNEL_CANDIDATE_COUNT];
+
+static bool is_active(void)
 {
-    s_channel_index = (s_channel_index + 1) % DB_CHANNEL_CANDIDATE_COUNT;
-    db_net_set_channel(s_channels[s_channel_index]);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool active = s_active && !s_found;
+    xSemaphoreGive(s_lock);
+    return active;
+}
+
+/* One task per window: HELLO on each channel, then wait for the panel's answer (ADR 0012). */
+static void discovery_task(void *arg)
+{
+    for (int i = 0; is_active(); i = (i + 1) % DB_CHANNEL_CANDIDATE_COUNT) {
+        db_net_set_channel(s_channels[i]);
+        db_proto_send_hello(s_broadcast, DB_OP_PAIR_HELLO);
+        /* Woken early by HELLO_ACK or by the end of the window. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CONFIG_DB_CHANNEL_DWELL_MS));
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_found) {
+        ESP_LOGI(TAG, "panel " MACSTR " answered on channel %u", MAC2STR(s_panel_mac), db_net_get_channel());
+    }
+    s_discovery_task = NULL;
+    xSemaphoreGive(s_lock);
+    vTaskDelete(NULL);
+}
+
+void pairing_on_hello(const uint8_t src[6], db_opcode_t opcode)
+{
+    if (opcode != DB_OP_PAIR_HELLO_ACK) {
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_active && !s_found) {
+        s_found = true;
+        memcpy(s_panel_mac, src, sizeof(s_panel_mac));
+        if (s_discovery_task) {
+            xTaskNotifyGive(s_discovery_task);
+        }
+    }
+    xSemaphoreGive(s_lock);
 }
 
 static void window_expired(void *arg)
@@ -42,12 +84,11 @@ static void on_espnow_event(void *arg, esp_event_base_t base, int32_t id, void *
 {
     if (id == ESP_EVENT_ESPNOW_SEC_OK) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        if (s_active) {
-            /* Stay on the channel where the panel was found; PAIR_CONFIG arrives here. */
-            esp_timer_stop(s_hop_timer);
-            memcpy(s_panel_mac, data, sizeof(s_panel_mac));
+        /* Only the panel that answered our HELLO may complete the pairing. */
+        if (s_active && s_found && memcmp(data, s_panel_mac, sizeof(s_panel_mac)) == 0) {
             s_handshake_done = true;
-            ESP_LOGI(TAG, "handshake with panel " MACSTR " on channel %u", MAC2STR(s_panel_mac), db_net_get_channel());
+            ESP_LOGI(TAG, "handshake with panel " MACSTR " on channel %u", MAC2STR(s_panel_mac),
+                     db_net_get_channel());
         }
         xSemaphoreGive(s_lock);
     } else if (id == ESP_EVENT_ESPNOW_SEC_FAIL) {
@@ -60,10 +101,7 @@ esp_err_t pairing_init(void)
     s_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_lock, ESP_ERR_NO_MEM, TAG, "no memory");
     db_net_channel_candidates(s_channels);
-
-    const esp_timer_create_args_t hop_args = { .callback = hop, .name = "pair_hop" };
     const esp_timer_create_args_t window_args = { .callback = window_expired, .name = "pair_window" };
-    ESP_RETURN_ON_ERROR(esp_timer_create(&hop_args, &s_hop_timer), TAG, "timer create failed");
     ESP_RETURN_ON_ERROR(esp_timer_create(&window_args, &s_window_timer), TAG, "timer create failed");
     return esp_event_handler_register(ESP_EVENT_ESPNOW, ESP_EVENT_ANY_ID, on_espnow_event, NULL);
 }
@@ -71,22 +109,26 @@ esp_err_t pairing_init(void)
 esp_err_t pairing_start(void)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (s_active) {
+    if (s_active || s_discovery_task) {
         xSemaphoreGive(s_lock);
         return ESP_ERR_INVALID_STATE;
     }
     s_active = true;
+    s_found = false;
     s_handshake_done = false;
-    s_channel_index = 0;
     xSemaphoreGive(s_lock);
 
-    db_net_set_channel(s_channels[0]);
     esp_err_t err = espnow_sec_responder_start(DB_SEC_POP);
     if (err == ESP_OK) {
-        err = esp_timer_start_periodic(s_hop_timer, (uint64_t)CONFIG_DB_CHANNEL_DWELL_MS * 1000U);
+        err = esp_timer_start_once(s_window_timer, (uint64_t)CONFIG_DB_PAIRING_WINDOW_S * 1000000U);
     }
     if (err == ESP_OK) {
-        err = esp_timer_start_once(s_window_timer, (uint64_t)CONFIG_DB_PAIRING_WINDOW_S * 1000000U);
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        if (xTaskCreate(discovery_task, "pair_discovery", DISCOVERY_TASK_STACK, NULL, DISCOVERY_TASK_PRIO,
+                        &s_discovery_task) != pdPASS) {
+            err = ESP_ERR_NO_MEM;
+        }
+        xSemaphoreGive(s_lock);
     }
     if (err != ESP_OK) {
         pairing_finish(false);
@@ -111,13 +153,16 @@ void pairing_finish(bool success)
     bool was_active = s_active;
     bool handshake_done = s_handshake_done;
     s_active = false;
+    s_found = false;
     s_handshake_done = false;
+    if (s_discovery_task) {
+        xTaskNotifyGive(s_discovery_task);  /* ends the discovery loop */
+    }
     xSemaphoreGive(s_lock);
     if (!was_active) {
         return;
     }
 
-    esp_timer_stop(s_hop_timer);
     esp_timer_stop(s_window_timer);
     espnow_sec_responder_stop();
     db_status_led_stop(DB_LED_PAIRING_MODE);

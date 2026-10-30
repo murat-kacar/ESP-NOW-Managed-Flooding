@@ -16,9 +16,10 @@ Result: key exchange only works within the panel's direct radio range. (To be ve
 ## Decision
 - The installer brings the module next to the panel, pairs it, then installs it in the apartment.
 - espnow_sec is used unmodified: the panel is the initiator, the apartment module is the responder.
-- Channel discovery: the unpaired module listens on channels 1, 6 and 11 in turn (`esp_wifi_set_channel`, in application code).
-  The panel stays on its own channel and scans with `espnow_sec_initiator_scan` during the pairing window.
-  When the handshake completes, the module stores its current channel in NVS. Dwell time per channel will be set by a bench test.
+- Channel discovery: the unpaired module visits the candidate channels in turn (`esp_wifi_set_channel`, in application
+  code), broadcasts a plaintext single-hop `PAIR_HELLO` on each and waits for the panel's `PAIR_HELLO_ACK`; the answer
+  locks the channel (ADR 0012). The panel stays on its own channel. The module stores the channel from `PAIR_CONFIG`.
+  Dwell time per channel will be set by a bench test.
 - No PoP is used. If the component requires a PoP value, the same non-secret fixed value is used on all devices
   (NULL support to be verified). Protection relies on physical proximity and the 20 s pairing window.
 - If the scan finds more than one unpaired module, pairing is cancelled and the panel shows an error.

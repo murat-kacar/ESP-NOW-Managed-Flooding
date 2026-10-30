@@ -198,7 +198,7 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(pairing_init());
-    ESP_ERROR_CHECK(db_proto_init(on_message));
+    ESP_ERROR_CHECK(db_proto_init(on_message, pairing_on_hello));
     ESP_ERROR_CHECK(xTaskCreate(app_task, "apartment", APP_TASK_STACK, NULL, APP_TASK_PRIO, NULL) == pdPASS
                     ? ESP_OK : ESP_ERR_NO_MEM);
 

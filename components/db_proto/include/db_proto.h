@@ -10,6 +10,7 @@ extern "C" {
 
 #define DB_PROTO_VERSION 1
 #define DB_MAC_LEN       6
+#define DB_TAG_LEN       16  /**< truncated HMAC-SHA256 authentication tag */
 
 /** Application message opcodes (SPEC 7.2). */
 typedef enum {
@@ -19,9 +20,17 @@ typedef enum {
     DB_OP_OPEN_DOOR_ACK = 4,    /**< Panel -> apartment */
     DB_OP_PAIR_CONFIG = 5,      /**< Panel -> apartment after the espnow_sec handshake: apartment number and channel */
     DB_OP_PAIR_CONFIG_ACK = 6,  /**< Apartment -> panel */
+    DB_OP_PAIR_HELLO = 7,       /**< Unauthenticated discovery, unpaired module -> broadcast, single hop */
+    DB_OP_PAIR_HELLO_ACK = 8,   /**< Unauthenticated discovery, panel in its pairing window -> module, single hop */
 } db_opcode_t;
 
-/** Application message, carried inside the encrypted esp-now payload. */
+/**
+ * Application message. On air it is followed by a DB_TAG_LEN tag:
+ * HMAC-SHA256(K_auth, src MAC || dest MAC || message), truncated, where K_auth = HKDF-Expand(app key,
+ * "doorbell message auth", 32) (RFC 5869; Extract is skipped because the app key is uniformly random).
+ * esp-now hands plaintext and decrypted frames to the application in the same way, so authenticity is checked
+ * here and does not depend on the transport encryption.
+ */
 typedef struct __attribute__((packed)) {
     uint8_t version;       /**< DB_PROTO_VERSION */
     uint8_t opcode;        /**< db_opcode_t */
@@ -46,8 +55,17 @@ typedef enum {
  */
 typedef void (*db_proto_handler_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg);
 
+/**
+ * @brief Called in the protocol task for an unauthenticated pairing discovery frame (DB_OP_PAIR_HELLO or
+ * DB_OP_PAIR_HELLO_ACK). It grants nothing: the handshake and the authenticated PAIR_CONFIG follow.
+ */
+typedef void (*db_proto_hello_handler_t)(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode);
+
 /** @brief Register the esp-now data handler and start the protocol task. db_net_init() must run first. */
-esp_err_t db_proto_init(db_proto_handler_t handler);
+esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_hello_handler_t hello_handler);
+
+/** @brief Send a pairing discovery frame (plaintext, not forwarded). dest may be the broadcast address. */
+esp_err_t db_proto_send_hello(const uint8_t dest[DB_MAC_LEN], db_opcode_t opcode);
 
 /**
  * @brief Send a message to one device (broadcast frame addressed to dest, forwarded by other nodes).
