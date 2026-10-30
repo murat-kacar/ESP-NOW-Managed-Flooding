@@ -5,7 +5,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILDS_DIR = REPO_ROOT / "builds"
-RECORDS_FILE = REPO_ROOT / "records" / "devices.csv"
+HISTORY_FILE = REPO_ROOT / "records" / "history.csv"
 
 ROLES = ("panel", "apartment")
 PROFILE_DEVELOPMENT = "development"
@@ -47,19 +47,13 @@ def firmware_elf(role: str) -> Path:
     return REPO_ROOT / "apps" / role / "build" / f"{role}.elf"
 
 
+def firmware_images(role: str) -> list[Path]:
+    """Merged images of a role in builds/, newest first (names sort by their timestamp)."""
+    return sorted(BUILDS_DIR.glob(f"{role}_*.bin"), reverse=True)
+
+
 def latest_firmware(role: str) -> Path | None:
-    """Newest merged image for a role; names sort by their timestamp."""
-    images = sorted(BUILDS_DIR.glob(f"{role}_*.bin"))
-    return images[-1] if images else None
+    images = firmware_images(role)
+    return images[0] if images else None
 
 
-def image_option(image: Path, name: str) -> str | None:
-    """Value of CONFIG_<name> in the sdkconfig fragment saved next to an image, if it was changed for that build."""
-    fragment = image.with_suffix(".config")
-    if not fragment.is_file():
-        return None
-    prefix = f"CONFIG_{name}="
-    for line in fragment.read_text(encoding="utf-8").splitlines():
-        if line.startswith(prefix):
-            return line[len(prefix):].strip().strip('"')
-    return None

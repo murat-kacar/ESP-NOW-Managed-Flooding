@@ -53,7 +53,7 @@ async def flash(
 ) -> None:
     """Write the merged image at 0x0 and, for roles with factory data, the per-device factory NVS."""
     device = await probe(runner, port)
-    # The generated factory NVS image is temporary; only the record row is kept.
+    # The generated factory NVS image is temporary; only the history row is kept.
     with tempfile.TemporaryDirectory(prefix="fctry-") as tmp:
         files = ["0x0", str(firmware)]
         if codes is not None:
@@ -61,7 +61,8 @@ async def flash(
             nvs_bin = await _generate_factory_nvs(runner, port, codes, partition.size, Path(tmp))
             files += [hex(partition.offset), str(nvs_bin)]
         await runner.worker(port, *_esptool(port, "write-flash", *files))
-    _record("flash", port, role, profile, device, codes, firmware.name)
+    if codes is not None:
+        _record("flash", port, role, profile, device, codes, firmware.name)
 
 
 async def flash_factory_nvs(runner: JobRunner, port: str, role: str, profile: str, codes: FactoryCodes) -> None:
@@ -96,20 +97,21 @@ async def reconfigure(runner: JobRunner, role: str) -> None:
 
 
 async def build(runner: JobRunner, role: str, sdkconfig_fragment: str) -> None:
-    """Build one role; a non-empty fragment is passed to build.py --config (saved next to the image)."""
+    """Build one role; a non-empty fragment is passed to build.py --config. The only output is the .bin image."""
     cmd = [sys.executable, str(REPO_ROOT / "tools" / "build.py"), role]
     if not sdkconfig_fragment:
         await runner.command("build", *cmd)
         return
     with tempfile.TemporaryDirectory(prefix="config-") as tmp:
-        fragment_file = Path(tmp) / f"{role}.config"
+        fragment_file = Path(tmp) / "sdkconfig.fragment"
         fragment_file.write_text(sdkconfig_fragment, encoding="utf-8")
         await runner.command("build", *cmd, "--config", str(fragment_file))
 
 
 def _record(
-    action: str, port: str, role: str, profile: str, device: dict[str, Any], codes: FactoryCodes | None, firmware: str,
+    action: str, port: str, role: str, profile: str, device: dict[str, Any], codes: FactoryCodes, firmware: str,
 ) -> None:
+    """History row for a factory NVS write (records/history.csv)."""
     records.append(
         action=action,
         profile=profile,
@@ -117,7 +119,7 @@ def _record(
         port=port,
         chip=device.get("chip", ""),
         mac=device.get("mac", ""),
-        admin_code=codes.admin_code if codes else "",
-        user_code=codes.user_code if codes else "",
+        admin_code=codes.admin_code,
+        user_code=codes.user_code,
         firmware=firmware,
     )

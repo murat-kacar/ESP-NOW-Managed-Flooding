@@ -1,7 +1,7 @@
 # ESP32 Smart Apartment Doorbell and Access Control System — Specification
 
 Version: 2026-10-29
-Sources: original project specification + `docs/adr/0001`–`0010`
+Sources: original project specification + `docs/adr/0001`–`0011`
 
 > Every decision in this document links to its ADR. Values not yet verified by measurement or test are marked **[TO VERIFY]** and listed in section 9.
 

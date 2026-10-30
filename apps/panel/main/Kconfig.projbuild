@@ -56,8 +56,10 @@ menu "Doorbell panel"
             bool "Code reset button pulls the GPIO LOW when pressed"
             default y
         config DB_CODE_RESET_BUTTON_PULLUP
-            bool "Enable internal pull-up on the code reset button"
+            bool "Enable the internal pull resistor on the code reset button"
             default y
+            help
+                espressif/button picks pull-up for an active-LOW button and pull-down for an active-HIGH one.
     endmenu
 
     menu "Keypad"
@@ -66,18 +68,7 @@ menu "Doorbell panel"
             default "123456789*0#"
             help
                 12 characters for the 3x4 matrix. Default is the ITU-T E.161 telephone keypad layout.
-        config DB_KEYPAD_DEBOUNCE_MS
-            int "Key debounce (ms)"
-            range 1 200
-            default 20
-            help
-                Not specified in SPEC; proposed value, not verified.
-        config DB_KEYPAD_SCAN_INTERVAL_MS
-            int "Matrix scan interval (ms)"
-            range 1 100
-            default 10
-            help
-                Not specified in SPEC; proposed value, not verified.
+        comment "Debounce and scan period: IoT Button menu (espressif/button), added with the keypad driver."
         config DB_KEYPAD_INPUT_TIMEOUT_S
             int "Input timeout (s)"
             range 3 60

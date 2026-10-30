@@ -26,7 +26,7 @@ LABEL_WRAP = 180  # px; long option names wrap instead of widening the form
 CHOICE_WIDTH = 18  # characters; longer choices are still readable in the drop-down list
 
 PROJECT_MENU_PREFIX = "Doorbell"
-COMPONENT_MENUS = ("ESP-NOW Configuration",)
+COMPONENT_MENUS = ("ESP-NOW Configuration", "IoT Button", "LED Indicator")
 IDF_SELECTED = (
     "ESP_DEFAULT_CPU_FREQ_MHZ",
     "ESP_BROWNOUT_DET",
@@ -147,6 +147,13 @@ class ConfigForm(ttk.Frame):
 
     def default_value(self, name: str) -> str | None:
         return self._defaults.get(name)
+
+    def current_value(self, name: str) -> str | None:
+        """Current value of a symbol, including values typed but not yet collected."""
+        if self._kconfig is None or name not in self._kconfig.syms:
+            return None
+        self._apply_entries_quietly()
+        return self._kconfig.syms[name].str_value
 
     def fragment(self) -> str:
         """Return sdkconfig lines for values changed from their defaults. Raises ValueError if a value is invalid."""

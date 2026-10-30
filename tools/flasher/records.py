@@ -1,4 +1,4 @@
-"""Append one row per device operation to the device record CSV.
+"""Append one row to the flashing history each time a factory NVS partition is written.
 
 The file contains plain-text codes: it is git-ignored and must be stored with restricted access.
 """
@@ -6,16 +6,16 @@ The file contains plain-text codes: it is git-ignored and must be stored with re
 import csv
 from datetime import datetime
 
-from .config import RECORDS_FILE
+from .config import HISTORY_FILE
 
 FIELDS = ("timestamp", "action", "profile", "role", "port", "chip", "mac", "admin_code", "user_code", "firmware")
 
 
 def append(**row: str) -> None:
-    RECORDS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    is_new = not RECORDS_FILE.exists()
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not HISTORY_FILE.exists()
     row.setdefault("timestamp", datetime.now().isoformat(timespec="seconds"))
-    with RECORDS_FILE.open("a", newline="", encoding="utf-8") as f:
+    with HISTORY_FILE.open("a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS, restval="")
         if is_new:
             writer.writeheader()

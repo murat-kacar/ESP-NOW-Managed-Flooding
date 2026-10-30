@@ -20,12 +20,14 @@ Left column (once per batch):
    Loading follows ESP-IDF kconfgen: the environment from `apps/<role>/build/config.env` is applied, `<IDF_PATH>/Kconfig` is parsed
    and `sdkconfig.defaults` is loaded, so defaults and visibility match `idf.py menuconfig`.
    If `config.env` is missing or older than a Kconfig/CMake input, the GUI runs `idf.py reconfigure` first (configure only, no compilation).
-   Shown sections: every "Doorbell ..." menu, the espressif/esp-now menu, and selected ESP-IDF options
+   Shown sections: every "Doorbell ..." menu, the espressif/esp-now, IoT Button and LED Indicator menus, and selected ESP-IDF options
    (CPU frequency, brownout, task and interrupt watchdogs, console UART and baud rate, flash mode/frequency/size, log level).
    Kconfig is the single source of truth for every adjustable parameter, its range, default and help text.
    Only values changed from their defaults are passed to the build.
-4. Build: runs `tools/build.py <role> [--config <fragment>]`; the newest `builds/<role>_*.bin` is used for flashing.
-   The fragment is saved as `builds/<role>_<timestamp>.config` next to the image.
+4. Build: runs `tools/build.py <role> [--config <fragment>]`. The only output is `builds/<role>_<timestamp>.bin`
+   (repository root); every configuration value is compiled into it. Configuration inputs are
+   `apps/<role>/sdkconfig.defaults` (read-only template) and the changed values, which are used as an intermediate
+   file in the build directory (`apps/<role>/build/sdkconfig.fragment`) and not kept as an output.
 
 Project Kconfig files: `components/db_net/Kconfig` (network, channels, regulatory, replay counter),
 `components/db_status_led/Kconfig` (LED polarity, PWM, brightness, pattern timing),
@@ -38,10 +40,13 @@ LED PWM 4 kHz (ESP-IDF `ledc_basic` example), Long Range off (ESP-IDF `espnow` e
 unverified proposals: LED dim 10 %, LED pattern timings except 1 Hz / 1 s / 2 s / 3 s, buzzer 2700 Hz, keypad debounce 20 ms and scan 10 ms,
 replay counter block 100.
 
-Code lengths: the device rows use the lengths of the image that will be flashed (its saved fragment, else the Kconfig default).
+Code lengths: the device rows use the admin and user code lengths currently set in the configuration form.
+The image does not carry its configuration, so the form must match the firmware being flashed.
 Development default codes are the first N digits of `1234567890` (`123456`, `1234`).
 
 Right column (per device, in parallel):
+- "Firmware to flash" selects the image: every `builds/<role>_*.bin` (newest first, newest selected after a build)
+  or any other `.bin` chosen with Browse.
 - Detect lists serial ports (pyserial) and identifies each chip (`esptool.cmds.detect_chip`).
 - Per device: admin code and user code (panel only, development defaults, Random button using `secrets`),
   progress bar, status, and the actions below.
@@ -61,7 +66,8 @@ Right column (per device, in parallel):
 - Each operation runs in its own process (`tools/flasher/esptool_worker.py`), so devices are flashed in true parallel.
   The worker installs a custom esptool logger (`esp_pylib.logger.EspLogBase`) and reports log, progress and results as JSON lines.
 - Jobs run on an asyncio loop in a background thread; the Tk thread only reads an event queue via `after()` (Tk is not thread-safe).
-- Every flash appends a row to `records/devices.csv` (timestamp, action, profile, role, port, chip, MAC, codes, firmware).
+- Every factory NVS write (Flash on the panel, Flash NVS) appends a row to `records/history.csv`
+  (timestamp, action, profile, role, port, chip, MAC, codes, firmware). Codes are entered manually before flashing.
   The file holds plain-text codes; it is git-ignored and must be stored with restricted access.
 - If Scan reports secure boot or flash encryption enabled, write actions are disabled for that device.
 

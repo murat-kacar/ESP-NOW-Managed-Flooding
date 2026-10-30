@@ -5,16 +5,17 @@ import subprocess
 import sys
 import tkinter as tk
 from collections.abc import Callable, Coroutine
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 import serial.tools.list_ports
 
 from . import operations
 from .config import (
-    ADMIN_CODE_LENGTH_FALLBACK, ADMIN_CODE_LENGTH_OPTION, LEFT_COLUMN_WIDTH, PROFILE_DEVELOPMENT,
-    PROFILE_PRODUCTION, ROLES, USER_CODE_LENGTH_FALLBACK, USER_CODE_LENGTH_OPTION, WINDOW_HEIGHT,
-    WINDOW_WIDTH, dev_code, firmware_elf, image_option, latest_firmware,
+    ADMIN_CODE_LENGTH_FALLBACK, ADMIN_CODE_LENGTH_OPTION, BUILDS_DIR, LEFT_COLUMN_WIDTH,
+    PROFILE_DEVELOPMENT, PROFILE_PRODUCTION, ROLES, USER_CODE_LENGTH_FALLBACK, USER_CODE_LENGTH_OPTION,
+    WINDOW_HEIGHT, WINDOW_WIDTH, dev_code, firmware_elf, firmware_images, latest_firmware,
 )
 from .factory_nvs import CodeLengths, FactoryCodes, random_code
 from .jobs import Event, JobRunner
@@ -136,6 +137,9 @@ class App(tk.Tk):
         self.profile = tk.StringVar(value=PROFILE_DEVELOPMENT)
         self.role = tk.StringVar(value=ROLES[0])
         self.firmware_var = tk.StringVar()
+        self.firmware_choice = tk.StringVar()  # display name of the image to flash
+        self._firmware_paths: dict[str, Path] = {}
+        self._browsed_images: dict[str, list[Path]] = {role: [] for role in ROLES}
         self.rows: dict[str, DeviceRow] = {}
         self.monitors: dict[str, subprocess.Popen] = {}
         self.building = False
@@ -212,6 +216,15 @@ class App(tk.Tk):
         header.pack(fill="x", pady=(0, 8))
         ttk.Label(header, text="Detection and flashing", font=("TkDefaultFont", 12, "bold")).pack(side="left")
         ttk.Button(header, text="Detect", command=self.detect).pack(side="right")
+
+        selector = ttk.Frame(parent)
+        selector.pack(fill="x", pady=(0, 8))
+        ttk.Label(selector, text="Firmware to flash").pack(side="left")
+        self.firmware_box = ttk.Combobox(selector, textvariable=self.firmware_choice, state="readonly", width=48)
+        self.firmware_box.pack(side="left", padx=(8, 4))
+        self.firmware_box.bind("<<ComboboxSelected>>", lambda _: self._on_firmware_selected())
+        ttk.Button(selector, text="Browse...", command=self.browse_firmware).pack(side="left")
+
         self.device_list = ScrollableFrame(parent)
         self.device_list.pack(fill="both", expand=True)
         self.empty_label = ttk.Label(self.device_list.inner, text="Press Detect to list connected devices.")
@@ -233,7 +246,7 @@ class App(tk.Tk):
             return
         if event.kind == "build_done":
             self.building = False
-            self._refresh_firmware()
+            self._refresh_firmware(select_newest=True)
             self._update_build_button()
             return
         if event.kind == "config_ready":
@@ -309,26 +322,65 @@ class App(tk.Tk):
         self.build_button.state(["!disabled"] if ready else ["disabled"])
 
     def code_lengths(self) -> CodeLengths:
-        """Code lengths of the firmware that will be flashed: its saved fragment, else the Kconfig default."""
-        image = latest_firmware(self.role.get())
+        """Code lengths from the configuration form (Kconfig), else the Kconfig defaults.
 
+        The image does not carry its configuration, so the form must match the firmware being flashed.
+        """
         def length(option: str, fallback: int) -> int:
-            value = image_option(image, option) if image else None
-            if value is None:
-                value = self.config_form.default_value(option) if hasattr(self, "config_form") else None
-            return int(value) if value else fallback
+            value = self.config_form.current_value(option) if hasattr(self, "config_form") else None
+            return int(value) if value and value.isdigit() else fallback
 
         return CodeLengths(
             admin=length(ADMIN_CODE_LENGTH_OPTION, ADMIN_CODE_LENGTH_FALLBACK),
             user=length(USER_CODE_LENGTH_OPTION, USER_CODE_LENGTH_FALLBACK),
         )
 
-    def _refresh_firmware(self) -> None:
-        image = latest_firmware(self.role.get())
-        self.firmware_var.set(f"Firmware: {image.name}" if image else "Firmware: not built yet")
+    def selected_firmware(self) -> Path | None:
+        if not hasattr(self, "firmware_box"):
+            return None
+        return self._firmware_paths.get(self.firmware_choice.get())
+
+    def _refresh_firmware(self, select_newest: bool = False) -> None:
+        """Refresh the last-build label and the list of images to flash for the current role."""
+        role = self.role.get()
+        newest = latest_firmware(role)
+        self.firmware_var.set(f"Last build: {newest.name}" if newest else "Last build: none")
+        if not hasattr(self, "firmware_box"):
+            return
+
+        images = firmware_images(role) + [p for p in self._browsed_images[role] if p.is_file()]
+        self._firmware_paths = {}
+        for image in images:
+            name = image.name if image.parent == BUILDS_DIR else f"{image.name} ({image.parent})"
+            self._firmware_paths[name] = image
+        names = list(self._firmware_paths)
+        self.firmware_box.configure(values=names)
+        if select_newest or self.firmware_choice.get() not in self._firmware_paths:
+            self.firmware_choice.set(names[0] if names else "")
+        self._on_firmware_selected()
+
+    def _on_firmware_selected(self) -> None:
         lengths = self.code_lengths()
         for row in self.rows.values():
             row.apply_lengths(lengths)
+
+    def browse_firmware(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self, title="Select a merged firmware image (flashed at 0x0)",
+            initialdir=BUILDS_DIR if BUILDS_DIR.is_dir() else None,
+            filetypes=[("Firmware image", "*.bin"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        image = Path(path).resolve()
+        role = self.role.get()
+        if image.parent != BUILDS_DIR and image not in self._browsed_images[role]:
+            self._browsed_images[role].append(image)
+        self._refresh_firmware()
+        for name, candidate in self._firmware_paths.items():
+            if candidate == image:
+                self.firmware_choice.set(name)
+        self._on_firmware_selected()
 
     # ----- jobs -----
 
@@ -359,6 +411,7 @@ class App(tk.Tk):
             messagebox.showerror("Invalid configuration", str(e), parent=self)
             return
         role = self.role.get()
+        self._on_firmware_selected()  # device rows follow the code lengths being built
         self.log(f"[build] {role}: " + (f"{fragment.count(chr(10))} changed option(s)" if fragment else "defaults"))
         self.building = True
         self._update_build_button()
@@ -390,10 +443,15 @@ class App(tk.Tk):
         for row in self.rows.values():
             self._start(row, "Detect", lambda r=row: operations.probe(self.runner, r.port))
 
-    def _firmware_or_warn(self) -> Any:
-        image = latest_firmware(self.role.get())
+    def _firmware_or_warn(self) -> Path | None:
+        image = self.selected_firmware()
         if image is None:
-            messagebox.showerror("No firmware", "Build the firmware for this role first.", parent=self)
+            messagebox.showerror("No firmware", "Build a firmware or select one with Browse first.", parent=self)
+            return None
+        if not image.is_file():
+            messagebox.showerror("No firmware", f"The selected image no longer exists:\n{image}", parent=self)
+            self._refresh_firmware()
+            return None
         return image
 
     def _codes_or_warn(self, row: DeviceRow) -> FactoryCodes | None:

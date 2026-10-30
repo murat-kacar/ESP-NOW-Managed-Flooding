@@ -30,8 +30,10 @@ menu "Doorbell apartment module"
             help
                 SPEC 2.2: buttons connect to GND.
         config DB_BUTTONS_PULLUP
-            bool "Enable internal pull-ups on the buttons"
+            bool "Enable the internal pull resistors on the buttons"
             default y
+            help
+                espressif/button picks pull-up for active-LOW buttons and pull-down for active-HIGH ones.
         config DB_STATUS_LED_GPIO
             int "Status LED"
             range 0 33
@@ -73,8 +75,11 @@ menu "Doorbell apartment module"
             default 12
         config DB_SERVICE_HOLD_CANCEL_S
             int "Pairing/reset button cancel after (s)"
-            range 3 120
+            range 3 65
             default 15
+            help
+                Upper limit 65 s: espressif/button long-press thresholds are 16-bit milliseconds.
+                Must be greater than the maximum hold.
     endmenu
 
     config DB_CHANNEL_DWELL_MS

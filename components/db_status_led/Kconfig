@@ -6,12 +6,7 @@ menu "Doorbell status LED"
         help
             Polarity of the on-board LED. Not verified against the NodeMCU-32S schematic yet.
 
-    config DB_LED_PWM_FREQUENCY_HZ
-        int "LED PWM frequency (Hz)"
-        range 100 40000
-        default 4000
-        help
-            LEDC frequency for brightness control. Default from ESP-IDF examples/peripherals/ledc/ledc_basic.
+    comment "PWM frequency and resolution: see the LED Indicator menu (espressif/led_indicator)."
 
     config DB_LED_BRIGHTNESS_FULL_PCT
         int "Full brightness (%)"

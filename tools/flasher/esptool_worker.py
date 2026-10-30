@@ -108,21 +108,26 @@ def scan(port: str) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("probe", "scan"):
-        sub.add_parser(name).add_argument("--port", required=True)
-    sub.add_parser("esptool").add_argument("esptool_args", nargs=argparse.REMAINDER)
-    args = parser.parse_args()
+    argv = sys.argv[1:]
+    # "esptool" passes everything after it to esptool unchanged. argparse.REMAINDER is not used:
+    # it is a legacy feature that rejects pass-through arguments starting with "-" (e.g. --chip).
+    passthrough = argv[1:] if argv[:1] == ["esptool"] else None
+    if passthrough is None:
+        parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        sub = parser.add_subparsers(dest="command", required=True)
+        for name in ("probe", "scan"):
+            sub.add_parser(name).add_argument("--port", required=True)
+        sub.add_parser("esptool", help="pass the remaining arguments to esptool")
+        args = parser.parse_args(argv)
 
     log.set_logger(JsonLogger())
     try:
-        if args.command == "probe":
+        if passthrough is not None:
+            esptool.main(passthrough)
+        elif args.command == "probe":
             emit({"type": "info", "data": probe(args.port)})
-        elif args.command == "scan":
-            emit({"type": "info", "data": scan(args.port)})
         else:
-            esptool.main(args.esptool_args)
+            emit({"type": "info", "data": scan(args.port)})
     except SystemExit as e:
         if e.code not in (0, None):
             emit({"type": "result", "ok": False, "error": f"esptool exited with code {e.code}"})
