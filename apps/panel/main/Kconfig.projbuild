@@ -1,0 +1,176 @@
+menu "Doorbell panel"
+
+    menu "GPIO"
+        comment "ESP32: GPIO 6-11 are used by flash; GPIO 34-39 are input-only without pull-ups."
+
+        config DB_KEYPAD_ROW0_GPIO
+            int "Keypad row 0"
+            range 0 33
+            default 13
+        config DB_KEYPAD_ROW1_GPIO
+            int "Keypad row 1"
+            range 0 33
+            default 14
+        config DB_KEYPAD_ROW2_GPIO
+            int "Keypad row 2"
+            range 0 33
+            default 27
+        config DB_KEYPAD_ROW3_GPIO
+            int "Keypad row 3"
+            range 0 33
+            default 26
+        config DB_KEYPAD_COL0_GPIO
+            int "Keypad column 0"
+            range 0 33
+            default 25
+        config DB_KEYPAD_COL1_GPIO
+            int "Keypad column 1"
+            range 0 33
+            default 33
+        config DB_KEYPAD_COL2_GPIO
+            int "Keypad column 2"
+            range 0 33
+            default 32
+        config DB_DOOR_RELAY_GPIO
+            int "Door relay"
+            range 0 33
+            default 23
+        config DB_DOOR_RELAY_ACTIVE_LOW
+            bool "Door relay is driven LOW to open"
+            default y
+            help
+                Active-LOW optocoupled relay module (ADR 0005).
+        config DB_BUZZER_GPIO
+            int "Buzzer"
+            range 0 33
+            default 4
+        config DB_STATUS_LED_GPIO
+            int "Status LED"
+            range 0 33
+            default 2
+        config DB_CODE_RESET_BUTTON_GPIO
+            int "Hidden code reset button"
+            range 0 33
+            default 19
+        config DB_CODE_RESET_BUTTON_ACTIVE_LOW
+            bool "Code reset button pulls the GPIO LOW when pressed"
+            default y
+        config DB_CODE_RESET_BUTTON_PULLUP
+            bool "Enable internal pull-up on the code reset button"
+            default y
+    endmenu
+
+    menu "Keypad"
+        config DB_KEYPAD_KEYMAP
+            string "Key map (rows top to bottom, columns left to right)"
+            default "123456789*0#"
+            help
+                12 characters for the 3x4 matrix. Default is the ITU-T E.161 telephone keypad layout.
+        config DB_KEYPAD_DEBOUNCE_MS
+            int "Key debounce (ms)"
+            range 1 200
+            default 20
+            help
+                Not specified in SPEC; proposed value, not verified.
+        config DB_KEYPAD_SCAN_INTERVAL_MS
+            int "Matrix scan interval (ms)"
+            range 1 100
+            default 10
+            help
+                Not specified in SPEC; proposed value, not verified.
+        config DB_KEYPAD_INPUT_TIMEOUT_S
+            int "Input timeout (s)"
+            range 3 60
+            default 10
+    endmenu
+
+    menu "Door and buzzer"
+        config DB_DOOR_PULSE_MS
+            int "Door relay pulse (ms)"
+            range 100 5000
+            default 500
+            help
+                ADR 0005.
+        config DB_BUZZER_DURATION_MS
+            int "Buzzer duration (ms)"
+            range 0 5000
+            default 500
+            help
+                ADR 0005 starts the buzzer with the relay for the same 0.5 s.
+        config DB_BUZZER_FREQUENCY_HZ
+            int "Buzzer tone frequency (Hz)"
+            range 100 10000
+            default 2700
+            help
+                Set from the passive buzzer's datasheet (resonant frequency). Proposed value, not verified.
+        config DB_BUZZER_DUTY_PCT
+            int "Buzzer PWM duty (%)"
+            range 1 99
+            default 50
+            help
+                50 % is a square wave.
+    endmenu
+
+    menu "Apartments and codes"
+        config DB_APARTMENT_MIN
+            int "Lowest apartment number"
+            range 1 254
+            default 1
+        config DB_APARTMENT_MAX
+            int "Highest apartment number"
+            range 1 254
+            default 99
+            help
+                SPEC 3.1. The message field is 8 bits.
+        config DB_ADMIN_CODE_LENGTH
+            int "Admin code length (digits)"
+            range 6 10
+            default 6
+            help
+                Minimum 6 to keep brute-force resistance (SPEC 4).
+        config DB_USER_CODE_LENGTH
+            int "User code length (digits)"
+            range 4 8
+            default 4
+    endmenu
+
+    menu "Keypad lockout"
+        config DB_LOCKOUT_ATTEMPTS
+            int "Wrong codes before lockout"
+            range 1 20
+            default 5
+        config DB_LOCKOUT_BASE_S
+            int "First lockout (s)"
+            range 10 3600
+            default 60
+        config DB_LOCKOUT_MULTIPLIER
+            int "Lockout multiplier on each further failure"
+            range 1 10
+            default 2
+            help
+                SPEC 4.1: the lockout doubles (120, 240 s, ...).
+        config DB_LOCKOUT_MAX_S
+            int "Maximum lockout (s)"
+            range 60 86400
+            default 900
+    endmenu
+
+    menu "Code reset button"
+        config DB_CODE_RESET_HOLD_MIN_S
+            int "Minimum hold (s)"
+            range 1 60
+            default 10
+        config DB_CODE_RESET_HOLD_MAX_S
+            int "Maximum hold (s)"
+            range 10 300
+            default 60
+    endmenu
+
+    config DB_RING_RETRIES
+        int "RING retries without ACK"
+        range 0 10
+        default 2
+        help
+            SPEC 7.4.
+
+endmenu

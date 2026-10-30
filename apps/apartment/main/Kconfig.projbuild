@@ -1,0 +1,96 @@
+menu "Doorbell apartment module"
+
+    menu "GPIO"
+        comment "ESP32: GPIO 6-11 are used by flash; GPIO 34-39 are input-only without pull-ups."
+
+        config DB_BELL_RELAY_GPIO
+            int "Bell relay"
+            range 0 33
+            default 4
+        config DB_BELL_RELAY_ACTIVE_HIGH
+            bool "Bell relay is driven HIGH to ring"
+            default y
+            help
+                SPEC 2.2.
+        config DB_DOOR_BUTTON_GPIO
+            int "Door-open button"
+            range 0 33
+            default 23
+        config DB_PAIRING_BUTTON_GPIO
+            int "Hidden pairing button"
+            range 0 33
+            default 18
+        config DB_RESET_BUTTON_GPIO
+            int "Hidden reset button"
+            range 0 33
+            default 19
+        config DB_BUTTONS_ACTIVE_LOW
+            bool "Buttons pull the GPIO LOW when pressed"
+            default y
+            help
+                SPEC 2.2: buttons connect to GND.
+        config DB_BUTTONS_PULLUP
+            bool "Enable internal pull-ups on the buttons"
+            default y
+        config DB_STATUS_LED_GPIO
+            int "Status LED"
+            range 0 33
+            default 2
+    endmenu
+
+    menu "Bell"
+        config DB_BELL_PULSE_MS
+            int "Bell relay pulse (ms)"
+            range 100 5000
+            default 500
+        config DB_VISUAL_BELL
+            bool "Blink the status LED while ringing"
+            default y
+            help
+                Visual bell for hearing-impaired residents (SPEC 11.2).
+    endmenu
+
+    menu "Buttons"
+        config DB_DOOR_BUTTON_MIN_MS
+            int "Door button minimum press (ms)"
+            range 10 1000
+            default 100
+            help
+                Shorter presses are ignored as noise.
+        config DB_DOOR_BUTTON_MAX_S
+            int "Door button maximum press (s)"
+            range 1 120
+            default 30
+            help
+                Longer presses are ignored as a stuck button.
+        config DB_SERVICE_HOLD_MIN_S
+            int "Pairing/reset button minimum hold (s)"
+            range 1 30
+            default 7
+        config DB_SERVICE_HOLD_MAX_S
+            int "Pairing/reset button maximum hold (s)"
+            range 2 60
+            default 12
+        config DB_SERVICE_HOLD_CANCEL_S
+            int "Pairing/reset button cancel after (s)"
+            range 3 120
+            default 15
+    endmenu
+
+    config DB_CHANNEL_DWELL_MS
+        int "Pairing channel dwell time (ms)"
+        range 500 10000
+        default 3000
+        help
+            Time the unpaired module listens on each candidate channel (ADR 0007).
+            No official default exists; 3000 ms exceeds one espnow_sec_initiator_scan cycle
+            (about 5 requests 500 ms apart). Not verified by bench test yet (SPEC 9).
+
+    config DB_OPEN_DOOR_RETRIES
+        int "OPEN_DOOR retries without ACK"
+        range 0 10
+        default 1
+        help
+            SPEC 7.4.
+
+endmenu

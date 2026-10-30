@@ -1,0 +1,87 @@
+menu "Doorbell status LED"
+
+    config DB_STATUS_LED_ACTIVE_HIGH
+        bool "LED is on when the GPIO is HIGH"
+        default y
+        help
+            Polarity of the on-board LED. Not verified against the NodeMCU-32S schematic yet.
+
+    config DB_LED_PWM_FREQUENCY_HZ
+        int "LED PWM frequency (Hz)"
+        range 100 40000
+        default 4000
+        help
+            LEDC frequency for brightness control. Default from ESP-IDF examples/peripherals/ledc/ledc_basic.
+
+    config DB_LED_BRIGHTNESS_FULL_PCT
+        int "Full brightness (%)"
+        range 1 100
+        default 100
+
+    config DB_LED_BRIGHTNESS_DIM_PCT
+        int "Dim brightness (%)"
+        range 1 100
+        default 10
+        help
+            "Dim, solid" state of the indoor module (SPEC 11.2). Not specified in SPEC; proposed value, not verified.
+
+    menu "Pattern timing"
+        comment "SPEC 11 gives only the slow blink (1 Hz) and the 1 s, 2 s and 3 s durations; other values are proposals."
+
+        config DB_LED_SHORT_FLASH_MS
+            int "Single short flash (ms)"
+            range 10 1000
+            default 50
+        config DB_LED_FAST_BLINK_PERIOD_MS
+            int "Fast blink period (ms)"
+            range 50 2000
+            default 200
+        config DB_LED_MEDIUM_BLINK_PERIOD_MS
+            int "Medium blink period (ms)"
+            range 100 3000
+            default 500
+        config DB_LED_SLOW_BLINK_PERIOD_MS
+            int "Slow blink period (ms)"
+            range 200 5000
+            default 1000
+            help
+                1 Hz (SPEC 11).
+        config DB_LED_PULSE_ON_MS
+            int "Double/triple flash: pulse on (ms)"
+            range 10 1000
+            default 100
+        config DB_LED_PULSE_GAP_MS
+            int "Double/triple flash: gap between pulses (ms)"
+            range 10 1000
+            default 100
+        config DB_LED_PULSE_CYCLE_MS
+            int "Double/triple flash: repeat period (ms)"
+            range 200 10000
+            default 1000
+        config DB_LED_SPARSE_FLASH_INTERVAL_MS
+            int "Sparse single flash interval (ms)"
+            range 500 30000
+            default 3000
+            help
+                Keypad lockout indication (SPEC 11.1).
+        config DB_LED_SUCCESS_MS
+            int "Success indication (ms)"
+            range 200 10000
+            default 2000
+            help
+                Solid 2 s (SPEC 11).
+        config DB_LED_ERROR_MS
+            int "Error indication (ms)"
+            range 200 10000
+            default 1000
+            help
+                Fast blink for 1 s (SPEC 11.1).
+        config DB_LED_NO_RESPONSE_MS
+            int "No-response indication (ms)"
+            range 200 10000
+            default 3000
+            help
+                Medium blink for 3 s (SPEC 11.1).
+    endmenu
+
+endmenu

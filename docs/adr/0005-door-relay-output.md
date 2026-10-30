@@ -1,23 +1,22 @@
-# 5. Kapı rölesi çıkışı (Dış panel, GPIO 23)
+# 5. Door relay output (outdoor panel, GPIO 23)
 
-Tarih: 2026-10-29
-Durum: Kabul edildi
+Date: 2026-10-29
+Status: Accepted
 
-## Bağlam
-Kapı kilidi tipi kurulum yerine göre değişir ve sistemin sorumluluğu dışındadır.
-Sistemin tek sorumluluğu: 3.3V ile çalışan, LOW ile sürülen optokuplörlü röle modülünü sürmek.
-Elektrik kesintisinde kapı kapalı kalmalıdır.
+## Context
+The door lock type depends on the installation site and is out of scope.
+The system's only responsibility is to drive a 3.3 V, active-LOW, optocoupled relay module.
+The door must stay locked on power loss.
 
-## Karar
-- GPIO 23, active-LOW. Boşta HIGH.
-- Kapı açma komutu geldiğinde GPIO 23, 0.5 saniye LOW tutulur, sonra HIGH'a çekilir.
-- Süre `esp_timer` one-shot zamanlayıcısıyla yönetilir; görev bloklanmaz.
-- Başlatmada çıkış seviyesi önce HIGH yapılır, ardından pin çıkış moduna alınır; açılışta LOW darbesi oluşmaz.
-- Bir çökme veya watchdog reset olursa pin reset durumuna döner ve röle bırakılır.
-- Buzzer (GPIO 4) röleyle aynı anda başlar ve aynı zamanlayıcıyla 0.5 saniye sonra durur.
+## Decision
+- GPIO 23, active-LOW. Idle level HIGH.
+- On a door-open command, GPIO 23 is held LOW for 0.5 s, then driven HIGH.
+- The pulse is timed with an `esp_timer` one-shot timer; no task is blocked.
+- At init the output level is set HIGH first, then the pin is switched to output mode, so no LOW glitch occurs at boot.
+- On a crash or watchdog reset the pin returns to its reset state and the relay is released.
+- The buzzer (GPIO 4) starts together with the relay and stops after 0.5 s on the same timer.
+- A second door-open command received while the pulse is active is ignored; the pulse is not extended.
 
-## Doğrulanacaklar (ölçümle)
-- Güç verme, reset ve flaşlama sırasında rölenin hiç çekmediği ölçülecek. Çekerse GPIO 23'e harici pull-up eklenecek.
-- Röle çekerken 3.3V hattındaki düşüş ölçülecek (brownout riski).
-
-- Darbe sürerken gelen ikinci kapı açma komutu yok sayılır; süre uzatılmaz.
+## To verify (by measurement)
+- The relay must not engage during power-up, reset or flashing. If it does, an external pull-up is added on GPIO 23.
+- Voltage drop on the 3.3 V rail while the relay engages (brownout risk).

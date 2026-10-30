@@ -1,0 +1,8 @@
+# Based on ESP-IDF components/partition_table/partitions_singleapp.csv,
+# plus a per-device factory NVS partition (ADR 0003). Fits 2 MB flash.
+# Offsets are explicit so host tools can locate "fctry" without a device.
+# Name,   Type, SubType, Offset,   Size,   Flags
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  1M,
+fctry,    data, nvs,     0x110000, 0x6000, readonly

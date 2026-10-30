@@ -4,3 +4,6 @@ CONFIG_ESP32_REV_MIN_3=y
 # espnow_sec uses protocomm security v1, which is off by default since ESP-IDF 6.x.
 # Same setting as every espressif/esp-now example's sdkconfig.defaults.
 CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y
+
+# partitions.csv adds the per-device factory NVS partition "fctry" (ADR 0003).
+CONFIG_PARTITION_TABLE_CUSTOM=y

@@ -1,31 +1,31 @@
-# 4. Secure Boot v2, Flash Encryption ve NVS Encryption
+# 4. Secure Boot v2, Flash Encryption and NVS Encryption
 
-Tarih: 2026-10-29
-Durum: Kabul edildi
+Date: 2026-10-29
+Status: Accepted
 
-## Bağlam
-Flaşta cihaza özel kodlar (ADR 0003) ve espnow_sec anahtarları tutulur. Koruma olmadan flaş okunarak bunlara ulaşılabilir.
-Kullanılan kartların çip revizyonu: ESP32 v3 (kullanıcı tarafından `esptool.py chip_id` ile doğrulandı).
-Espressif dokümanı: Secure Boot v2, ESP32'de v3.0 ve sonrasında desteklenir.
+## Context
+Flash holds per-device codes (ADR 0003) and espnow_sec keys. Without protection they can be read from flash.
+Chip revision of the boards in use: ESP32 v3 (verified by the user with `esptool.py chip_id`).
+Espressif documentation: Secure Boot v2 is supported on ESP32 from revision v3.0.
 
-Proje geliştirme ve test aşamasındadır; bu aşamada her değişiklik geri alınabilir olmalıdır.
-Espressif dokümanına göre Flash Encryption Development modu bile geri alınamaz eFuse işlemleri yapar:
-anahtar bir kez yazılır ve korunur, JTAG kapatılır, şifreleme çip başına yalnızca 3 kez kapatılabilir.
+The project is in development and testing; every change must be reversible in this phase.
+According to Espressif documentation, even Flash Encryption Development mode performs irreversible eFuse operations:
+the key is written once and protected, JTAG is disabled, and encryption can be disabled only 3 times per chip.
 
-## Karar
-İki ayrı yapılandırma profili kullanılır (ESP-IDF `SDKCONFIG_DEFAULTS` ile):
+## Decision
+Two configuration profiles are used (via ESP-IDF `SDKCONFIG_DEFAULTS`):
 
-| | Geliştirme (`sdkconfig.defaults`) | Üretim (`sdkconfig.defaults.prod`) |
+| | Development (`sdkconfig.defaults`) | Production (`sdkconfig.defaults.prod`) |
 |---|---|---|
 | `CONFIG_ESP32_REV_MIN` | v3.0 | v3.0 |
-| Secure Boot v2 | Kapalı | Açık (RSA-PSS imzalı imajlar) |
-| Flash Encryption | Kapalı | Açık, Release modu |
-| NVS Encryption | Kapalı | Açık (flash encryption tabanlı `nvs_keys`; ESP32'de HMAC çevre birimi yok) |
-| eFuse yakma | Yok | Üretim hattında |
+| Secure Boot v2 | Off | On (RSA-PSS signed images) |
+| Flash Encryption | Off | On, Release mode |
+| NVS Encryption | Off | On (flash-encryption-based `nvs_keys`; ESP32 has no HMAC peripheral) |
+| eFuse burning | None | On the production line |
 
-## Sonuçlar
-- Geliştirme kartlarında hiçbir eFuse yakılmaz; tüm değişiklikler geri alınabilir.
-- Üretim profili ayrıca, eFuse yakılmadan önce ayrılmış test kartlarında doğrulanır.
-- Üretimde yalnızca v3.0 ve üstü ESP32 kullanılabilir.
-- OTA imajları üretimde imzalı olmalıdır; imzalama anahtarı güvenli ortamda saklanır.
-- Bölüm 5'teki "0x0'dan birleşik imaj flaşlama" yöntemi yalnızca geliştirme profilinde geçerlidir; üretim flaşlama akışı ayrıca tanımlanacak.
+## Consequences
+- No eFuse is burned on development boards; all changes stay reversible.
+- The production profile is validated on dedicated test boards before any eFuse is burned.
+- Production can only use ESP32 revision v3.0 or later.
+- OTA images must be signed in production; the signing key is kept in a secure environment.
+- Flashing a merged image at 0x0 (SPEC section 8) applies to the development profile only; the production flashing flow will be defined separately.

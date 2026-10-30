@@ -1,26 +1,24 @@
-# 6. Wi-Fi kanalı kurulumda seçilir
+# 6. Wi-Fi channel is selected at installation
 
-Tarih: 2026-10-29
-Durum: Kabul edildi
+Date: 2026-10-29
+Status: Accepted
 
-## Bağlam
-Şartnamede kanal 1 saha verisi olmadan sabitlenmişti. Binadaki Wi-Fi ağları aynı kanalı kullanabilir.
-Tüm ESP-NOW düğümleri aynı kanalda olmalıdır.
+## Context
+The original specification fixed channel 1 without site data. Wi-Fi networks in the building may use the same channel.
+All ESP-NOW nodes must be on the same channel.
 
-espressif/esp-now bileşeninde (kaynak: `espnow.h`, `espnow.c`):
-- `frame_head.channel = ESPNOW_CHANNEL_ALL`: paket, ülke ayarındaki tüm kanallarda sırayla gönderilir.
-- `CONFIG_ESPNOW_AUTO_RESTORE_CHANNEL`: gönderimden sonra asıl kanala dönülür.
-- Kanal tarama veya kanal bulma fonksiyonu yoktur.
+In the espressif/esp-now component (source: `espnow.h`, `espnow.c`):
+- `frame_head.channel = ESPNOW_CHANNEL_ALL`: the packet is sent on every channel of the country setting, one after another.
+- `CONFIG_ESPNOW_AUTO_RESTORE_CHANNEL`: the original channel is restored after sending.
+- There is no channel scan or channel discovery function.
 
-## Karar
-- Kanal adayları: 1, 6, 11 (örtüşmeyen kanallar).
-- Kurulumda panel `esp_wifi_scan_start` ile saha taraması yapar ve adaylardan birini seçer.
-  Seçim kriteri: en az AP sayısı; eşitlikte en düşük en yüksek RSSI.
-- Seçilen kanal panelde NVS'de saklanır.
-- Kanal, eşleştirme sırasında şifreli olarak daire modülüne iletilir; modül NVS'de saklar.
-- Kurulumdan sonra kanal değiştirilemez. Değişmesi gerekirse tüm daireler yeniden eşleştirilir.
-- Panel, NVS'de kanal yoksa açılışta otomatik tarama yapar (ilk kurulum, bina sıfırlama sonrası).
-- Bina sıfırlama kanalı ve uygulama anahtarını da siler.
-
-## Açık
-- Eşleşmemiş modülün panelin kanalını nasıl bulacağı (eşleştirme ADR'sinde tanımlanacak).
+## Decision
+- Candidate channels: 1, 6, 11 (non-overlapping).
+- At installation the panel runs a site scan with `esp_wifi_scan_start` and selects one candidate.
+  Selection criterion: fewest APs; on a tie, the lowest maximum RSSI.
+- The selected channel is stored in the panel's NVS.
+- The channel is sent encrypted to the apartment module during pairing; the module stores it in NVS.
+- The channel cannot be changed after installation. If it must change, all apartments are paired again.
+- If no channel is stored in NVS, the panel scans automatically at boot (first installation, after a building reset).
+- A building reset also erases the channel and the application key.
+- How an unpaired module finds the panel's channel: see ADR 0007.

@@ -1,6 +1,9 @@
 # Store and check out text files with LF line endings on every OS.
 * text=auto eol=lf
 
+# Windows batch files need CRLF for cmd.exe
+*.bat text eol=crlf
+
 # Binary files
 *.bin binary
 *.png binary

@@ -1,31 +1,36 @@
-# 9. Proje yapısı
+# 9. Project structure
 
-Tarih: 2026-10-29
-Durum: Kabul edildi
+Date: 2026-10-29
+Status: Accepted
 
-## Bağlam
-İki ayrı rol (dış panel, daire modülü) aynı haberleşme koduna ihtiyaç duyar.
-Geliştirme ortamı: ESP-IDF v6.1 (`C:\esp\v6.1\esp-idf`).
+## Context
+Two roles (outdoor panel, apartment module) need the same communication code.
+Development environment: ESP-IDF v6.1 (`C:\esp\v6.1\esp-idf`).
 
-## Karar
-ESP-IDF'in belgelenmiş yöntemi: her rol ayrı bir ESP-IDF projesi, ortak kod `EXTRA_COMPONENT_DIRS` ile paylaşılan bileşenlerde.
+## Decision
+The documented ESP-IDF approach: each role is a separate ESP-IDF project; shared code lives in components shared via `EXTRA_COMPONENT_DIRS`.
 
 ```
-apps/panel/        Dış panel projesi
-apps/apartment/    Daire modülü projesi
-components/        Ortak bileşenler (db_net, ...)
-docs/              Şartname ve ADR'ler
+apps/panel/        Outdoor panel project
+apps/apartment/    Apartment module project
+components/        Shared components (db_net, ...)
+docs/              Specification and ADRs
 ```
 
-- CMake şablonu ESP-IDF v6.1 `tools/templates/sample_project` ve `examples/get-started/hello_world` ile aynıdır (`cmake_minimum_required(VERSION 3.22)`, `MINIMAL_BUILD ON`).
-- Wi-Fi başlatma sırası ESP-IDF `examples/wifi/espnow` ve esp-now `examples/get-started` örneklerine göre yapılır.
-- Bağımlılıklar `idf_component.yml` ile; `dependencies.lock` sürüm kontrolüne eklenir.
-- Her projenin kendi `sdkconfig.defaults` dosyası vardır.
+- The CMake files match ESP-IDF v6.1 `tools/templates/sample_project` and `examples/get-started/hello_world` (`cmake_minimum_required(VERSION 3.22)`, `MINIMAL_BUILD ON`).
+- Wi-Fi init order follows ESP-IDF `examples/wifi/espnow` and the esp-now `examples/get-started` example.
+- Dependencies are declared in `idf_component.yml`; `dependencies.lock` is committed.
+- Each project has its own `sdkconfig.defaults`.
 
-## Sonuçlar
-- Her rol ayrı derlenir: `idf.py -C apps/panel build`, `idf.py -C apps/apartment build`.
-- Dağıtım çıktısı rol başına tek dosyadır: `python tools/build.py` → `builds/<rol>_YYYY-MM-DD_HH-MM-SS.bin` (offset 0x0).
-  Betik yalnızca resmi `idf.py build` ve `idf.py merge-bin` komutlarını çağırır.
-- espressif/esp-now 2.5.3, IDF 6.1 ile derleniyor (2026-10-29). Koşul: `CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y`
-  (IDF 6.x'te varsayılan kapalı; esp-now'ın tüm örnekleri bu ayarı açar).
-- İlk derlemede uygulama imajı 0xbca50 bayt; varsayılan 1 MB uygulama bölümünün %26'sı boş.
+## Consequences
+- Each role is built separately: `idf.py -C apps/panel build`, `idf.py -C apps/apartment build`.
+- The deliverable is one file per role: `python tools/build.py` → `builds/<role>_YYYY-MM-DD_HH-MM-SS.bin` (offset 0x0).
+  The script only calls the official `idf.py build` and `idf.py merge-bin` commands.
+- Every build deletes the generated `sdkconfig` and passes `SDKCONFIG_DEFAULTS` explicitly
+  (`sdkconfig.defaults`, plus an optional fragment via `--config`), because ESP-IDF applies defaults only when no `sdkconfig` exists.
+  Configuration is therefore defined by files only; changes made with `idf.py menuconfig` are not kept.
+- Adjustable parameters are Kconfig options: `components/db_net/Kconfig` and `apps/<role>/main/Kconfig.projbuild` (prefix `CONFIG_DB_`).
+- espressif/esp-now 2.5.3 builds with IDF 6.1 (2026-10-29). Requirement: `CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y`
+  (off by default in IDF 6.x; every esp-now example enables it).
+- First build: application image 0xbca50 bytes; 26 % of the default 1 MB application partition is free.
+- ESP-IDF does not support spaces in project paths (ESP-IDF get-started documentation), so the project path must not contain spaces.

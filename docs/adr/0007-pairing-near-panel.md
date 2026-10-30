@@ -1,39 +1,37 @@
-# 7. Eşleştirme panelin yanında yapılır
+# 7. Pairing is done next to the panel
 
-Tarih: 2026-10-29
-Durum: Kabul edildi
+Date: 2026-10-29
+Status: Accepted
 
-## Bağlam
-espressif/esp-now kaynak kodundan:
-- Bileşen yalnızca `broadcast = true` paketleri iletir (forward).
-- espnow_sec el sıkışmasında Command 0'dan sonraki tüm paketler unicast'tir (`broadcast = false`), dolayısıyla iletilmez.
-- `CONFIG_ESPNOW_SEC_SEND_FORWARD_TTL` varsayılanı 0'dır.
-- Initiator ve responder kanal değiştirmez; ikisi aynı kanalda olmalıdır.
-- Responder, el sıkışmayı başlatan ilk initiator'ı kabul eder; yapılandırıldıktan sonra yeni el sıkışmalarını yok sayar.
+## Context
+From the espressif/esp-now source code:
+- The component only forwards packets with `broadcast = true`.
+- In the espnow_sec handshake, every packet after Command 0 is unicast (`broadcast = false`), so it is not forwarded.
+- `CONFIG_ESPNOW_SEC_SEND_FORWARD_TTL` defaults to 0.
+- Initiator and responder never change channel; both must be on the same channel.
+- The responder accepts the first initiator that starts a handshake and ignores new handshakes once configured.
 
-Sonuç: anahtar değişimi yalnızca panelin doğrudan radyo menzilinde çalışır. (Tezgâh testiyle doğrulanacak.)
+Result: key exchange only works within the panel's direct radio range. (To be verified by a bench test.)
 
-## Karar
-- Montajcı modülü panelin yanına getirir, eşleştirir, sonra daireye takar.
-- espnow_sec bileşeni değiştirilmeden kullanılır: panel initiator, daire modülü responder.
+## Decision
+- The installer brings the module next to the panel, pairs it, then installs it in the apartment.
+- espnow_sec is used unmodified: the panel is the initiator, the apartment module is the responder.
+- Channel discovery: the unpaired module listens on channels 1, 6 and 11 in turn (`esp_wifi_set_channel`, in application code).
+  The panel stays on its own channel and scans with `espnow_sec_initiator_scan` during the pairing window.
+  When the handshake completes, the module stores its current channel in NVS. Dwell time per channel will be set by a bench test.
+- No PoP is used. If the component requires a PoP value, the same non-secret fixed value is used on all devices
+  (NULL support to be verified). Protection relies on physical proximity and the 20 s pairing window.
+- If the scan finds more than one unpaired module, pairing is cancelled and the panel shows an error.
 
-## Değerlendirilen alternatifler
-- Bileşeni çok atlamalı el sıkışma için değiştirmek: resmi koddan sapma.
-- Özel anahtar değişimi yazmak: özel kriptografi, reddedildi.
+## Alternatives considered
+- Modifying the component for a multi-hop handshake: deviates from official code.
+- Writing a custom key exchange: custom cryptography, rejected.
+- Per-device PoP printed on a label (Espressif Wi-Fi provisioning approach): rejected by user preference.
 
-## Sonuçlar
-- Eşleştirme fiziksel yakınlık gerektirir; uzaktan sahte cihaz eşleştirilemez.
-- Şartnamedeki daire içinden eşleştirme akışı (Bölüm 3.3) buna göre yeniden yazılacak.
+## Consequences
+- Pairing requires physical proximity; a rogue device cannot be paired remotely.
+- The in-apartment pairing flow of the original specification (section 3.3) is replaced.
 
-- Kanal bulma: eşleşmemiş modül 1, 6, 11 kanallarında sırayla dinler (`esp_wifi_set_channel`, uygulama kodunda).
-  Panel kendi kanalında kalır ve eşleştirme penceresi boyunca `espnow_sec_initiator_scan` ile tarar.
-  Modül, el sıkışma tamamlandığında bulunduğu kanalı NVS'ye yazar. Kanal başına bekleme süresi tezgâh testiyle belirlenecek.
-
-- PoP kullanılmaz. Bileşen bir PoP değeri gerektiriyorsa, tüm cihazlarda aynı ve gizli olmayan sabit bir değer verilir
-  (NULL desteği doğrulanacak). Koruma fiziksel yakınlık ve 20 saniyelik eşleştirme penceresine dayanır.
-
-## Kabul edilen risk
-- Eşleştirme penceresi açıkken panelin menzilindeki herhangi bir eşleşmemiş modül eşleşebilir.
-- Değerlendirilen alternatif: cihaza özel, etikete basılı PoP (Espressif Wi-Fi provisioning yaklaşımı). Kullanıcı tercihiyle reddedildi.
-
-- Risk azaltma: tarama birden fazla eşleşmemiş modül bulursa eşleştirme iptal edilir ve panel hata gösterir.
+## Accepted risk
+- While the pairing window is open, any unpaired module within the panel's range could be paired.
+  Mitigation: pairing is cancelled when more than one unpaired module is found.

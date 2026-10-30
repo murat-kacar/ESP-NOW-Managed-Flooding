@@ -1,23 +1,23 @@
-# 1. Haberleşme çekirdeği: espressif/esp-now bileşeni
+# 1. Communication core: espressif/esp-now component
 
-Tarih: 2026-10-29
-Durum: Kabul edildi
+Date: 2026-10-29
+Status: Accepted
 
-## Bağlam
-Şartnamede flooding motoru (`db_mesh_pkt_t`, dedup ring, jitter, TTL, ACK) sıfırdan yazılacaktı.
-Espressif'in resmi `espressif/esp-now` bileşeni (v2.5.3, ESP-IDF >= 4.4, Apache-2.0) bunları sağlıyor.
+## Context
+The original specification planned a custom flooding engine (`db_mesh_pkt_t`, deduplication ring buffer, jitter, TTL, ACK).
+Espressif's official `espressif/esp-now` component (v2.5.3, ESP-IDF >= 4.4, Apache-2.0) already provides these.
 
-## Karar
-Haberleşme `espressif/esp-now` üzerine kurulur. Kullanılacak özellikler:
+## Decision
+Communication is built on `espressif/esp-now`. Features used:
 - Forwarding: `forward_ttl`, `forward_rssi`, `filter_weak_signal`
-- Tekrar filtresi: `magic` (rastgele, 32 girişlik önbellek)
-- Güvenilirlik: `ack`, `retransmit_count`
-- Güvenlik: espnow_sec (ECDH + PoP ile anahtar dağıtımı, AES128-CCM, paket başına rastgele IV)
-- OTA: bileşenin OTA modülü
+- Duplicate filter: `magic` (random, 32-entry cache)
+- Reliability: `ack`, `retransmit_count`
+- Security: espnow_sec (ECDH + PoP key exchange, AES128-CCM, random IV per packet)
+- OTA: the component's OTA module
 
-## Sonuçlar
-- Özel flooding kodu, CRC-16, jitter ve `seq` alanı kaldırılır.
-- Bileşende replay koruması yoktur; uygulama katmanında eklenir (bkz. ADR 0002).
-- PoP varsayılanı (`espnow_pop`) kullanılmaz.
-- `forward_ttl` en fazla 30 olabilir: `ESPNOW_FORWARD_MAX_COUNT` (31) değerinde TTL azaltılmaz, yani sınırsız iletim olur.
-- Açık: başka anahtarla şifrelenmiş paketlerin iletilip iletilmediği testle doğrulanacak.
+## Consequences
+- The custom flooding code, CRC-16, jitter and the `seq` field are removed.
+- The component has no replay protection; it is added at the application layer (see ADR 0002).
+- PoP handling: see ADR 0007.
+- `forward_ttl` must be at most 30: at `ESPNOW_FORWARD_MAX_COUNT` (31) the TTL is not decremented, which means unlimited forwarding.
+- Open: whether packets encrypted with a different key are still forwarded must be verified by a bench test.

@@ -7,5 +7,8 @@ managed_components/
 # Merged images (SPEC 8)
 builds/
 
+# Device records with plain-text codes (tools/flasher/records.py)
+records/
+
 # Python
 __pycache__/

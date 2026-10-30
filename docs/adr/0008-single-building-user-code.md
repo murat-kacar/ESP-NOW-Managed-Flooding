@@ -1,15 +1,15 @@
-# 8. Tek bina kullanıcı kodu
+# 8. Single building user code
 
-Tarih: 2026-10-29
-Durum: Kabul edildi
+Date: 2026-10-29
+Status: Accepted
 
-## Karar
-Panelden kapı açma için tüm binada tek bir 4 haneli kullanıcı kodu kullanılır: `* kod #`.
-Kodun fabrika değeri cihaza özeldir (ADR 0003); yönetici değiştirir.
+## Decision
+A single 4-digit user code is used for the whole building to open the door from the panel: `* <user_code> #`.
+Its factory value is per-device (ADR 0003); the admin changes it.
 
-## Değerlendirilen alternatif
-Daire başına kod (`* daire * kod #`): sızıntı tek daireyle sınırlı kalır ve iz bırakır. Kullanıcı tercihiyle reddedildi.
+## Alternative considered
+Per-apartment code (`* <apartment_no> * <code> #`): a leak stays limited to one apartment and leaves a trace. Rejected by user preference.
 
-## Kabul edilen risk
-- Kod sızarsa tüm bina için değiştirilmeli ve tüm sakinlere duyurulmalıdır.
-- Kapıyı kimin açtığı bilinmez.
+## Accepted risk
+- If the code leaks, it must be changed for the whole building and announced to all residents.
+- It is not known who opened the door.

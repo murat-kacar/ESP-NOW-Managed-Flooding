@@ -1,0 +1,105 @@
+menu "Doorbell network"
+
+    choice DB_TX_POWER
+        prompt "Maximum TX power"
+        default DB_TX_POWER_20DBM
+        help
+            Maximum Wi-Fi TX power (SPEC 7.6). 20 dBm is the ESP-IDF default maximum.
+
+        config DB_TX_POWER_10DBM
+            bool "10 dBm (lab bench)"
+        config DB_TX_POWER_20DBM
+            bool "20 dBm (field)"
+    endchoice
+
+    config DB_FORWARD_TTL
+        int "Forward TTL (hops)"
+        range 1 30
+        default 10
+        help
+            Maximum number of hops (frame_head.forward_ttl). Default from esp-now
+            ESPNOW_CONTROL_FORWARD_TTL. 31 means unlimited in esp-now and is not allowed.
+            Not verified by field measurement yet (SPEC 9).
+
+    config DB_FORWARD_RSSI
+        int "Forward RSSI threshold (dBm)"
+        range -70 -30
+        default -55
+        help
+            Packets received weaker than this are not forwarded (frame_head.forward_rssi).
+            Default and range from esp-now ESPNOW_CONTROL_FORWARD_RSSI.
+            Not verified by field measurement yet (SPEC 9).
+
+    config DB_RETRANSMIT_COUNT
+        int "Retransmit count"
+        range 0 31
+        default 10
+        help
+            Radio retransmissions per packet (frame_head.retransmit_count, 5-bit field).
+            Default from esp-now ESPNOW_FRAME_CONFIG_DEFAULT.
+
+    config DB_ACK_TIMEOUT_MS
+        int "Application ACK timeout (ms)"
+        range 50 5000
+        default 400
+        help
+            Time to wait for RING_ACK / OPEN_DOOR_ACK (SPEC 7.4). esp-now has no default for
+            end-to-end ACKs; 400 ms is the original specification value. Not verified yet (SPEC 9).
+
+    config DB_PAIRING_WINDOW_S
+        int "Pairing window (s)"
+        range 10 120
+        default 20
+        help
+            How long the panel scans and the unpaired module waits during pairing (SPEC 5.1).
+
+    config DB_FILTER_WEAK_SIGNAL
+        bool "Drop packets weaker than the forward RSSI threshold"
+        default n
+        help
+            frame_head.filter_weak_signal. Off in esp-now ESPNOW_FRAME_CONFIG_DEFAULT.
+
+    config DB_REPLAY_COUNTER_BLOCK
+        int "Replay counter NVS block size"
+        range 1 10000
+        default 100
+        help
+            The counter is persisted once per block of messages to limit flash wear (ADR 0002).
+            To be set from usage data; proposed value, not verified (SPEC 9).
+
+    menu "Wi-Fi channel"
+        comment "Candidate channels for the installation site scan (ADR 0006)."
+
+        config DB_CHANNEL_CANDIDATE_1
+            int "Candidate channel 1"
+            range 1 13
+            default 1
+        config DB_CHANNEL_CANDIDATE_2
+            int "Candidate channel 2"
+            range 1 13
+            default 6
+        config DB_CHANNEL_CANDIDATE_3
+            int "Candidate channel 3"
+            range 1 13
+            default 11
+    endmenu
+
+    menu "Wi-Fi regulatory and PHY"
+        config DB_WIFI_COUNTRY_OVERRIDE
+            bool "Set a Wi-Fi country code"
+            default n
+            help
+                Off keeps the ESP-IDF default country setting. The country limits usable channels and TX power.
+        config DB_WIFI_COUNTRY_CODE
+            string "Country code (ISO 3166-1 alpha-2)"
+            depends on DB_WIFI_COUNTRY_OVERRIDE
+            default ""
+        config DB_WIFI_LONG_RANGE
+            bool "Enable ESP-NOW Long Range mode"
+            default n
+            help
+                PHY rate 512 kbps or 256 kbps for longer range. Default from ESP-IDF examples/wifi/espnow.
+                Effect between floors to be measured in the field.
+    endmenu
+
+endmenu
