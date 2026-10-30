@@ -235,10 +235,10 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
 | # | Item | Method |
 |---|---|---|
 | 1 | espnow_sec handshake is single-hop | Bench test |
-| 2 | ~~Whether the espnow_sec PoP parameter accepts NULL~~ — No (`ESP_PARAM_CHECK`); fixed non-secret PoP used (ADR 0012) | Source code ✔ |
+| 2 | ~~Whether the espnow_sec PoP parameter accepts NULL~~ — No (`ESP_PARAM_CHECK`); fixed non-secret PoP used (ADR 0012) | Source code (done) |
 | 3 | Dwell time per channel during channel hopping (3000 ms > one 2.5 s scan) | Bench test |
 | 4 | Whether packets encrypted with a different key are forwarded — Yes per source code (forwarded before decryption) | Bench test |
-| 5 | ~~How the espnow_sec application key is generated~~ — `esp_fill_random()` on the panel, as in the esp-now security example | Source code ✔ |
+| 5 | ~~How the espnow_sec application key is generated~~ — `esp_fill_random()` on the panel, as in the esp-now security example | Source code (done) |
 | 6 | End-to-end latency and ACK timeout | Field measurement |
 | 7 | `forward_ttl` and `forward_rssi` values | Field measurement |
 | 8 | Signal penetration between floors, delivery when an intermediate node is lost | Field measurement |
