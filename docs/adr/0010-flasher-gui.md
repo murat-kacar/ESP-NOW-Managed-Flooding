@@ -47,8 +47,9 @@ The image does not carry its configuration, so the form must match the firmware 
 Development default codes are the first N digits of `1234567890` (`123456`, `1234`).
 
 Right column (per device, in parallel):
-- "Firmware to flash" selects the image: every `builds/<role>_*.bin` (newest first, newest selected after a build)
-  or any other `.bin` chosen with Browse.
+- Each device row has its own Role and Firmware selection, so a panel and an apartment module can be flashed at the
+  same time. The list shows every `builds/<role>_*.bin` of the row's role (newest first; rows of a just-built role
+  select the new image) and any `.bin` chosen with Browse. The left Role only selects what is configured and built.
 - Detect lists serial ports (pyserial) and identifies each chip (`esptool.cmds.detect_chip`).
 - Per device: admin code and user code (panel only, development defaults, Random button using `secrets`),
   progress bar, status, and the actions below.

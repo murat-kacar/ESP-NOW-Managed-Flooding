@@ -1,4 +1,8 @@
-"""Tk user interface: build wizard on the left, detected devices on the right."""
+"""Tk user interface: build wizard on the left, detected devices on the right.
+
+The left role selects the configuration and build. Each device row has its own role and image,
+so different devices can be flashed with different firmware at the same time.
+"""
 
 import queue
 import subprocess
@@ -27,33 +31,49 @@ MONITOR_POLL_MS = 500
 LOG_MAX_LINES = 3000
 CONFIG_FORM_HEIGHT = 250
 CODE_ENTRY_WIDTH = 12
+FIRMWARE_BOX_WIDTH = 34
 ROLES_WITH_FACTORY_CODES = ("panel",)
 
 
 class DeviceRow(ttk.LabelFrame):
-    """One detected serial device with its codes, actions, progress and status."""
+    """One detected serial device with its role, image, codes, actions, progress and status."""
 
-    def __init__(self, master: tk.Misc, app: "App", port: str, description: str) -> None:
+    def __init__(self, master: tk.Misc, app: "App", port: str, description: str, role: str) -> None:
         title = description if port in description else f"{description} ({port})"
         super().__init__(master, text=title, padding=8)
         self.app = app
         self.port = port
         self.busy = False
         self.locked = False  # secure boot or flash encryption enabled: no serial writes
+        self._images: dict[str, Path] = {}
 
         self.info_var = tk.StringVar(value="Not probed")
         ttk.Label(self, textvariable=self.info_var).grid(row=0, column=0, sticky="w")
 
+        image_line = ttk.Frame(self)
+        image_line.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(image_line, text="Role").pack(side="left")
+        self.role_var = tk.StringVar(value=role)
+        role_box = ttk.Combobox(image_line, textvariable=self.role_var, values=ROLES, state="readonly", width=10)
+        role_box.pack(side="left", padx=(4, 12))
+        role_box.bind("<<ComboboxSelected>>", lambda _: self._on_role_selected())
+        ttk.Label(image_line, text="Firmware").pack(side="left")
+        self.image_var = tk.StringVar()
+        self.image_box = ttk.Combobox(image_line, textvariable=self.image_var, state="readonly",
+                                      width=FIRMWARE_BOX_WIDTH)
+        self.image_box.pack(side="left", padx=(4, 4))
+        ttk.Button(image_line, text="Browse...", command=self._browse).pack(side="left")
+
         lengths = app.code_lengths()
         self.codes_frame = ttk.Frame(self)
-        self.codes_frame.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.codes_frame.grid(row=2, column=0, sticky="w", pady=(6, 0))
         self.admin_var = tk.StringVar(value=dev_code(lengths.admin))
         self.user_var = tk.StringVar(value=dev_code(lengths.user))
         self._code_field(0, "Admin code", self.admin_var, lambda: app.code_lengths().admin)
         self._code_field(3, "User code", self.user_var, lambda: app.code_lengths().user)
 
         actions = ttk.Frame(self)
-        actions.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        actions.grid(row=3, column=0, sticky="w", pady=(6, 0))
         self.buttons: dict[str, ttk.Button] = {}
         for column, (name, command) in enumerate((
             ("Flash", app.flash),
@@ -68,12 +88,18 @@ class DeviceRow(ttk.LabelFrame):
             self.buttons[name] = button
 
         progress_line = ttk.Frame(self)
-        progress_line.grid(row=3, column=0, sticky="we", pady=(6, 0))
+        progress_line.grid(row=4, column=0, sticky="we", pady=(6, 0))
         self.progress = ttk.Progressbar(progress_line, maximum=100, length=260, mode="determinate")
         self.progress.pack(side="left")
         self.status_var = tk.StringVar(value="Idle")
         self.status_label = ttk.Label(progress_line, textvariable=self.status_var)
         self.status_label.pack(side="left", padx=(8, 0))
+
+        self._on_role_selected()
+
+    @property
+    def role(self) -> str:
+        return self.role_var.get()
 
     def _code_field(self, column: int, label: str, var: tk.StringVar, length: Callable[[], int]) -> None:
         ttk.Label(self.codes_frame, text=label).grid(row=0, column=column, padx=(0 if column == 0 else 12, 4))
@@ -85,6 +111,35 @@ class DeviceRow(ttk.LabelFrame):
             self.codes_frame, text="Random", width=8, command=lambda: var.set(random_code(length())),
         ).grid(row=0, column=column + 2, padx=(4, 0))
 
+    def _on_role_selected(self) -> None:
+        if self.role in ROLES_WITH_FACTORY_CODES:
+            self.codes_frame.grid()
+            self.buttons["Flash NVS"].grid()
+        else:
+            self.codes_frame.grid_remove()
+            self.buttons["Flash NVS"].grid_remove()
+        self.refresh_images()
+
+    def refresh_images(self, select_newest: bool = False) -> None:
+        """List the images of this row's role, newest first."""
+        self._images = self.app.firmware_choices(self.role)
+        names = list(self._images)
+        self.image_box.configure(values=names)
+        if select_newest or self.image_var.get() not in self._images:
+            self.image_var.set(names[0] if names else "")
+
+    def _browse(self) -> None:
+        image = self.app.browse_firmware(self.role)
+        if image is None:
+            return
+        self.refresh_images()
+        for name, candidate in self._images.items():
+            if candidate == image:
+                self.image_var.set(name)
+
+    def selected_image(self) -> Path | None:
+        return self._images.get(self.image_var.get())
+
     def codes(self) -> FactoryCodes:
         return FactoryCodes(admin_code=self.admin_var.get(), user_code=self.user_var.get())
 
@@ -93,14 +148,6 @@ class DeviceRow(ttk.LabelFrame):
         for var, length in ((self.admin_var, lengths.admin), (self.user_var, lengths.user)):
             if len(var.get()) != length:
                 var.set(dev_code(length))
-
-    def set_role(self, role: str) -> None:
-        if role in ROLES_WITH_FACTORY_CODES:
-            self.codes_frame.grid()
-            self.buttons["Flash NVS"].grid()
-        else:
-            self.codes_frame.grid_remove()
-            self.buttons["Flash NVS"].grid_remove()
 
     def set_busy(self, busy: bool) -> None:
         self.busy = busy
@@ -135,10 +182,8 @@ class App(tk.Tk):
         self._place_window()
 
         self.profile = tk.StringVar(value=PROFILE_DEVELOPMENT)
-        self.role = tk.StringVar(value=ROLES[0])
+        self.role = tk.StringVar(value=ROLES[0])  # configuration and build role
         self.firmware_var = tk.StringVar()
-        self.firmware_choice = tk.StringVar()  # display name of the image to flash
-        self._firmware_paths: dict[str, Path] = {}
         self._browsed_images: dict[str, list[Path]] = {role: [] for role in ROLES}
         self.rows: dict[str, DeviceRow] = {}
         self.monitors: dict[str, subprocess.Popen] = {}
@@ -184,7 +229,7 @@ class App(tk.Tk):
         ttk.Label(profile, text="Production is not defined yet (ADR 0004).", foreground="gray").grid(
             row=2, column=0, sticky="w")
 
-        role = ttk.LabelFrame(parent, text="2. Role", padding=8)
+        role = ttk.LabelFrame(parent, text="2. Role to configure and build", padding=8)
         role.grid(row=2, column=0, sticky="we", pady=(8, 0))
         for column, name in enumerate(ROLES):
             ttk.Radiobutton(role, text=name.capitalize(), value=name, variable=self.role).grid(
@@ -216,15 +261,6 @@ class App(tk.Tk):
         header.pack(fill="x", pady=(0, 8))
         ttk.Label(header, text="Detection and flashing", font=("TkDefaultFont", 12, "bold")).pack(side="left")
         ttk.Button(header, text="Detect", command=self.detect).pack(side="right")
-
-        selector = ttk.Frame(parent)
-        selector.pack(fill="x", pady=(0, 8))
-        ttk.Label(selector, text="Firmware to flash").pack(side="left")
-        self.firmware_box = ttk.Combobox(selector, textvariable=self.firmware_choice, state="readonly", width=48)
-        self.firmware_box.pack(side="left", padx=(8, 4))
-        self.firmware_box.bind("<<ComboboxSelected>>", lambda _: self._on_firmware_selected())
-        ttk.Button(selector, text="Browse...", command=self.browse_firmware).pack(side="left")
-
         self.device_list = ScrollableFrame(parent)
         self.device_list.pack(fill="both", expand=True)
         self.empty_label = ttk.Label(self.device_list.inner, text="Press Detect to list connected devices.")
@@ -246,7 +282,7 @@ class App(tk.Tk):
             return
         if event.kind == "build_done":
             self.building = False
-            self._refresh_firmware(select_newest=True)
+            self._refresh_firmware(built_role=event.payload)
             self._update_build_button()
             return
         if event.kind == "config_ready":
@@ -276,11 +312,8 @@ class App(tk.Tk):
     # ----- configuration -----
 
     def _on_role_change(self) -> None:
-        role = self.role.get()
-        for row in self.rows.values():
-            row.set_role(role)
         self._refresh_firmware()
-        self._load_config(role)
+        self._load_config(self.role.get())
 
     def _load_config(self, role: str, after_reconfigure: bool = False) -> None:
         if not after_reconfigure and config_env_is_stale(role):
@@ -296,7 +329,7 @@ class App(tk.Tk):
             self.config_form.show_message(f"Could not load the configuration: {e}")
             self.log(f"[config] Could not load Kconfig for {role}: {e}")
         self._update_build_button()
-        self._refresh_firmware()
+        self._apply_code_lengths()
 
     async def _run_reconfigure(self, role: str) -> None:
         try:
@@ -322,9 +355,9 @@ class App(tk.Tk):
         self.build_button.state(["!disabled"] if ready else ["disabled"])
 
     def code_lengths(self) -> CodeLengths:
-        """Code lengths from the configuration form (Kconfig), else the Kconfig defaults.
+        """Panel code lengths from the configuration form when it shows the panel, else the Kconfig defaults.
 
-        The image does not carry its configuration, so the form must match the firmware being flashed.
+        The image does not carry its configuration, so the form must match the panel firmware being flashed.
         """
         def length(option: str, fallback: int) -> int:
             value = self.config_form.current_value(option) if hasattr(self, "config_form") else None
@@ -335,52 +368,40 @@ class App(tk.Tk):
             user=length(USER_CODE_LENGTH_OPTION, USER_CODE_LENGTH_FALLBACK),
         )
 
-    def selected_firmware(self) -> Path | None:
-        if not hasattr(self, "firmware_box"):
-            return None
-        return self._firmware_paths.get(self.firmware_choice.get())
-
-    def _refresh_firmware(self, select_newest: bool = False) -> None:
-        """Refresh the last-build label and the list of images to flash for the current role."""
-        role = self.role.get()
-        newest = latest_firmware(role)
-        self.firmware_var.set(f"Last build: {newest.name}" if newest else "Last build: none")
-        if not hasattr(self, "firmware_box"):
-            return
-
-        images = firmware_images(role) + [p for p in self._browsed_images[role] if p.is_file()]
-        self._firmware_paths = {}
-        for image in images:
-            name = image.name if image.parent == BUILDS_DIR else f"{image.name} ({image.parent})"
-            self._firmware_paths[name] = image
-        names = list(self._firmware_paths)
-        self.firmware_box.configure(values=names)
-        if select_newest or self.firmware_choice.get() not in self._firmware_paths:
-            self.firmware_choice.set(names[0] if names else "")
-        self._on_firmware_selected()
-
-    def _on_firmware_selected(self) -> None:
+    def _apply_code_lengths(self) -> None:
         lengths = self.code_lengths()
         for row in self.rows.values():
             row.apply_lengths(lengths)
 
-    def browse_firmware(self) -> None:
+    # ----- firmware images -----
+
+    def firmware_choices(self, role: str) -> dict[str, Path]:
+        """Display name -> image for a role: builds/ newest first, then images chosen with Browse."""
+        choices = {}
+        for image in firmware_images(role) + [p for p in self._browsed_images[role] if p.is_file()]:
+            name = image.name if image.parent == BUILDS_DIR else f"{image.name} ({image.parent})"
+            choices[name] = image
+        return choices
+
+    def browse_firmware(self, role: str) -> Path | None:
         path = filedialog.askopenfilename(
-            parent=self, title="Select a merged firmware image (flashed at 0x0)",
+            parent=self, title=f"Select a merged {role} image (flashed at 0x0)",
             initialdir=BUILDS_DIR if BUILDS_DIR.is_dir() else None,
             filetypes=[("Firmware image", "*.bin"), ("All files", "*.*")],
         )
         if not path:
-            return
+            return None
         image = Path(path).resolve()
-        role = self.role.get()
         if image.parent != BUILDS_DIR and image not in self._browsed_images[role]:
             self._browsed_images[role].append(image)
-        self._refresh_firmware()
-        for name, candidate in self._firmware_paths.items():
-            if candidate == image:
-                self.firmware_choice.set(name)
-        self._on_firmware_selected()
+        return image
+
+    def _refresh_firmware(self, built_role: str | None = None) -> None:
+        """Refresh the last-build label and every row's image list; rows of a just-built role select the new image."""
+        newest = latest_firmware(self.role.get())
+        self.firmware_var.set(f"Last build: {newest.name}" if newest else "Last build: none")
+        for row in self.rows.values():
+            row.refresh_images(select_newest=row.role == built_role)
 
     # ----- jobs -----
 
@@ -411,7 +432,7 @@ class App(tk.Tk):
             messagebox.showerror("Invalid configuration", str(e), parent=self)
             return
         role = self.role.get()
-        self._on_firmware_selected()  # device rows follow the code lengths being built
+        self._apply_code_lengths()  # device rows follow the code lengths being built
         self.log(f"[build] {role}: " + (f"{fragment.count(chr(10))} changed option(s)" if fragment else "defaults"))
         self.building = True
         self._update_build_button()
@@ -424,7 +445,7 @@ class App(tk.Tk):
         except Exception as e:
             self.runner.post("build", "log", f"Build of {role} failed: {e}")
         finally:
-            self.runner.post("build", "build_done")
+            self.runner.post("build", "build_done", role)
 
     def detect(self) -> None:
         ports = {p.device: p.description for p in serial.tools.list_ports.comports()}
@@ -432,9 +453,8 @@ class App(tk.Tk):
             self.rows.pop(port).destroy()
         for port in sorted(ports):
             if port not in self.rows:
-                row = DeviceRow(self.device_list.inner, self, port, ports[port])
+                row = DeviceRow(self.device_list.inner, self, port, ports[port], self.role.get())
                 row.pack(fill="x", pady=(0, 8))
-                row.set_role(self.role.get())
                 self.rows[port] = row
         if self.rows:
             self.empty_label.pack_forget()
@@ -443,14 +463,14 @@ class App(tk.Tk):
         for row in self.rows.values():
             self._start(row, "Detect", lambda r=row: operations.probe(self.runner, r.port))
 
-    def _firmware_or_warn(self) -> Path | None:
-        image = self.selected_firmware()
+    def _image_or_warn(self, row: DeviceRow) -> Path | None:
+        image = row.selected_image()
         if image is None:
-            messagebox.showerror("No firmware", "Build a firmware or select one with Browse first.", parent=self)
+            messagebox.showerror("No firmware", f"Build a {row.role} firmware or select one with Browse.", parent=self)
             return None
         if not image.is_file():
             messagebox.showerror("No firmware", f"The selected image no longer exists:\n{image}", parent=self)
-            self._refresh_firmware()
+            row.refresh_images()
             return None
         return image
 
@@ -464,9 +484,9 @@ class App(tk.Tk):
         return codes
 
     def flash(self, row: DeviceRow) -> None:
-        role = self.role.get()
-        firmware = self._firmware_or_warn()
-        if firmware is None:
+        role = row.role
+        image = self._image_or_warn(row)
+        if image is None:
             return
         codes = None
         if role in ROLES_WITH_FACTORY_CODES:
@@ -474,13 +494,13 @@ class App(tk.Tk):
             if codes is None:
                 return
         profile = self.profile.get()
-        self._start(row, "Flash", lambda: operations.flash(self.runner, row.port, role, profile, firmware, codes))
+        self._start(row, "Flash", lambda: operations.flash(self.runner, row.port, role, profile, image, codes))
 
     def flash_factory_nvs(self, row: DeviceRow) -> None:
         codes = self._codes_or_warn(row)
         if codes is None:
             return
-        role, profile = self.role.get(), self.profile.get()
+        role, profile = row.role, self.profile.get()
         self._start(row, "Flash NVS", lambda: operations.flash_factory_nvs(self.runner, row.port, role, profile, codes))
 
     def factory_reset(self, row: DeviceRow) -> None:
@@ -510,7 +530,7 @@ class App(tk.Tk):
             messagebox.showerror("Monitor", "Opening a monitor console is only implemented on Windows.", parent=self)
             return
         cmd = [sys.executable, "-m", "esp_idf_monitor", "--port", row.port]
-        elf = firmware_elf(self.role.get())
+        elf = firmware_elf(row.role)
         if elf.exists():
             cmd.append(str(elf))
         self.monitors[row.port] = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
