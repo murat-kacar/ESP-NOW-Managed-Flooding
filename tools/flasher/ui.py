@@ -282,8 +282,8 @@ class App(tk.Tk):
         self._refresh_firmware()
         self._load_config(role)
 
-    def _load_config(self, role: str) -> None:
-        if config_env_is_stale(role):
+    def _load_config(self, role: str, after_reconfigure: bool = False) -> None:
+        if not after_reconfigure and config_env_is_stale(role):
             # build/config.env lists the Kconfig files; ESP-IDF regenerates it on reconfigure.
             self.configuring = True
             self._update_build_button()
@@ -312,7 +312,7 @@ class App(tk.Tk):
             self._load_config(self.role.get())
             return
         if ok:
-            self._load_config(role)
+            self._load_config(role, after_reconfigure=True)  # load once; never reconfigure in a loop
         else:
             self.config_form.show_message("idf.py reconfigure failed; see the log.")
             self._update_build_button()

@@ -177,6 +177,7 @@ typedef struct __attribute__((packed)) {
     uint8_t  opcode;       // db_opcode_t
     uint8_t  apartment;    // Target or source apartment
     uint8_t  channel;      // PAIR_CONFIG: Wi-Fi channel; otherwise 0
+    uint32_t session;      // Pairing session chosen by the panel; other sessions are dropped
     uint32_t counter;      // Sender's replay counter (ADR 0002)
     uint32_t ack_counter;  // ACKs: counter of the acknowledged request
 } db_msg_t;

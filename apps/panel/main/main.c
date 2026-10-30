@@ -81,14 +81,14 @@ static void show_result(esp_err_t err)
 
 static void ring(uint8_t apartment)
 {
-    uint8_t mac[6];
-    if (!registry_get(apartment, mac)) {
+    registry_entry_t entry;
+    if (!registry_get(apartment, &entry)) {
         ESP_LOGI(TAG, "apartment %u is not registered", apartment);
         show_result(ESP_ERR_NOT_FOUND);
         return;
     }
-    db_msg_t msg = { .opcode = DB_OP_RING, .apartment = apartment };
-    esp_err_t err = db_proto_request(mac, &msg, DB_OP_RING_ACK, CONFIG_DB_RING_RETRIES);
+    db_msg_t msg = { .opcode = DB_OP_RING, .apartment = apartment, .session = entry.session };
+    esp_err_t err = db_proto_request(entry.mac, &msg, DB_OP_RING_ACK, CONFIG_DB_RING_RETRIES);
     if (err == ESP_OK) {
         db_status_led_start(DB_LED_SUCCESS);
     } else if (err == ESP_ERR_TIMEOUT) {
@@ -135,8 +135,9 @@ static void on_command(const command_t *command)
         show_result(pairing_run(command->apartment));
         break;
     case COMMAND_DELETE: {
-        uint8_t mac[6];
-        show_result(registry_get(command->apartment, mac) ? registry_remove(command->apartment) : ESP_ERR_NOT_FOUND);
+        registry_entry_t entry;
+        show_result(registry_get(command->apartment, &entry) ? registry_remove(command->apartment)
+                                                             : ESP_ERR_NOT_FOUND);
         break;
     }
     case COMMAND_SET_USER_CODE:
@@ -155,8 +156,10 @@ static void on_command(const command_t *command)
 static void on_message(const uint8_t src[6], const db_msg_t *msg)
 {
     uint8_t apartment;
-    if (msg->opcode != DB_OP_OPEN_DOOR || !registry_find(src, &apartment) || apartment != msg->apartment) {
-        return;  /* only registered modules, for their own apartment number */
+    registry_entry_t entry;
+    if (msg->opcode != DB_OP_OPEN_DOOR || !registry_find(src, &apartment, &entry) || apartment != msg->apartment ||
+            msg->session != entry.session) {
+        return;  /* only registered modules, for their own apartment number, in the current session */
     }
     switch (db_proto_check_counter(src, msg->counter)) {
     case DB_REPLAY_NEW:

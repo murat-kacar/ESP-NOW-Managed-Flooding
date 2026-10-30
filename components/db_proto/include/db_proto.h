@@ -27,6 +27,7 @@ typedef struct __attribute__((packed)) {
     uint8_t opcode;        /**< db_opcode_t */
     uint8_t apartment;     /**< Target or source apartment */
     uint8_t channel;       /**< DB_OP_PAIR_CONFIG: Wi-Fi channel; otherwise 0 */
+    uint32_t session;      /**< Pairing session, chosen by the panel at pairing; messages of other sessions are dropped */
     uint32_t counter;      /**< Sender's replay counter (ADR 0002) */
     uint32_t ack_counter;  /**< ACK opcodes: counter of the acknowledged request; otherwise 0 */
 } db_msg_t;
@@ -55,11 +56,11 @@ esp_err_t db_proto_init(db_proto_handler_t handler);
  */
 esp_err_t db_proto_send(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg);
 
-/** @brief Send an ACK opcode for a received request. */
+/** @brief Send an ACK opcode for a received request (same apartment and session). */
 esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, const db_msg_t *request);
 
 /**
- * @brief Send a request and wait for its ACK; retries reuse the same counter (SPEC 7.4).
+ * @brief Send a request and wait for its ACK (same session); retries reuse the same counter (SPEC 7.4).
  *
  * @return ESP_OK when the ACK arrived, ESP_ERR_TIMEOUT when all attempts went unanswered.
  *         Call from a task that may block; one request at a time per device.
@@ -70,11 +71,12 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
 db_replay_t db_proto_check_counter(const uint8_t src[DB_MAC_LEN], uint32_t counter);
 
 /**
- * @brief Erase the stored counters of all peers; this device's own send counter is kept (module reset).
- *
- * Peer counters are never erased when a pairing is deleted: the building key stays the same, so a captured
- * old message would otherwise be accepted again after re-pairing.
+ * @brief Forget one peer's counter. Only safe together with a new session: messages captured in the old
+ * session carry the old session value and are dropped, so the peer may start counting again (pairing).
  */
+esp_err_t db_proto_forget_peer(const uint8_t mac[DB_MAC_LEN]);
+
+/** @brief Erase the stored counters of all peers; this device's own send counter is kept (module reset). */
 esp_err_t db_proto_erase_peer_counters(void);
 
 /** @brief Erase all counters, including this device's own (building reset, which also replaces the key). */

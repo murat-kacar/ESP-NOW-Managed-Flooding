@@ -54,7 +54,7 @@ static void handle_pair_config(const uint8_t src[6], const db_msg_t *msg)
     if (get_identity(&current)) {
         /* The panel did not get our ACK and retried with the same counter: acknowledge again. */
         if (memcmp(src, current.panel_mac, sizeof(current.panel_mac)) == 0 && msg->apartment == current.apartment &&
-                db_proto_check_counter(src, msg->counter) == DB_REPLAY_RETRY) {
+                msg->session == current.session && db_proto_check_counter(src, msg->counter) == DB_REPLAY_RETRY) {
             db_proto_ack(src, DB_OP_PAIR_CONFIG_ACK, msg);
         }
         return;
@@ -62,7 +62,7 @@ static void handle_pair_config(const uint8_t src[6], const db_msg_t *msg)
     if (!pairing_is_expected_panel(src) || db_proto_check_counter(src, msg->counter) != DB_REPLAY_NEW) {
         return;
     }
-    identity_t identity = { .apartment = msg->apartment, .channel = msg->channel };
+    identity_t identity = { .apartment = msg->apartment, .channel = msg->channel, .session = msg->session };
     memcpy(identity.panel_mac, src, sizeof(identity.panel_mac));
     if (identity_save(&identity) != ESP_OK) {
         ESP_LOGE(TAG, "storing the identity failed");
@@ -97,8 +97,8 @@ static void on_message(const uint8_t src[6], const db_msg_t *msg)
     if (!get_identity(&identity) || memcmp(src, identity.panel_mac, sizeof(identity.panel_mac)) != 0) {
         return;  /* only the paired panel is accepted */
     }
-    if (msg->opcode != DB_OP_RING || msg->apartment != identity.apartment) {
-        return;
+    if (msg->opcode != DB_OP_RING || msg->apartment != identity.apartment || msg->session != identity.session) {
+        return;  /* messages of an earlier pairing session are dropped */
     }
     switch (db_proto_check_counter(src, msg->counter)) {
     case DB_REPLAY_NEW:
@@ -122,7 +122,7 @@ static void request_door_open(void)
         ESP_LOGW(TAG, "door-open ignored: not paired");
         return;
     }
-    db_msg_t msg = { .opcode = DB_OP_OPEN_DOOR, .apartment = identity.apartment };
+    db_msg_t msg = { .opcode = DB_OP_OPEN_DOOR, .apartment = identity.apartment, .session = identity.session };
     esp_err_t err = db_proto_request(identity.panel_mac, &msg, DB_OP_OPEN_DOOR_ACK, CONFIG_DB_OPEN_DOOR_RETRIES);
     ESP_LOGI(TAG, "door-open request: %s", err == ESP_OK ? "acknowledged" : esp_err_to_name(err));
 }

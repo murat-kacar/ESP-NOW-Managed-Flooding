@@ -10,6 +10,7 @@ typedef struct {
     uint8_t apartment;
     uint8_t channel;
     uint8_t panel_mac[6];
+    uint32_t session;  /**< pairing session from PAIR_CONFIG; carried by every message */
 } identity_t;
 
 /** @brief Load the stored identity; false if the module is not paired. */

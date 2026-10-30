@@ -26,16 +26,24 @@ Facts from the espressif/esp-now 2.5.3 sources (`managed_components/espressif__e
   message to a queue; a protocol task processes it (SPEC 7.1).
 
 ### Message
-`version, opcode, apartment, channel, counter, ack_counter` (12 bytes). Opcodes 1-4 as in SPEC 7.2, plus
-`PAIR_CONFIG` (5, panel to module: apartment and channel) and `PAIR_CONFIG_ACK` (6).
-An ACK carries its own counter and the counter of the acknowledged request.
+`version, opcode, apartment, channel, session, counter, ack_counter` (16 bytes). Opcodes 1-4 as in SPEC 7.2, plus
+`PAIR_CONFIG` (5, panel to module: apartment, channel and session) and `PAIR_CONFIG_ACK` (6).
+An ACK carries its own counter, the counter of the acknowledged request and the request's session.
+
+### Pairing session
+The panel picks a random `session` (`esp_random()`) at every pairing, stores it with the module's MAC in the registry
+and sends it in `PAIR_CONFIG`; the module stores it in its identity. Every message carries it, and a message with a
+different session is dropped (the same idea as the BLE Mesh IV index).
+Why: a module reset, the flasher's Factory reset, and flashing at 0x0 all erase the module's NVS, including its own
+send counter, so after re-pairing it counts from 1 again. With a new session, every message captured in the old
+session is invalid, so the panel can forget that MAC's counter at pairing (`db_proto_forget_peer()`).
 
 ### Replay counters (ADR 0002)
 - Own send counter: NVS namespace `db_ctr_own`, reserved in blocks of `DB_REPLAY_COUNTER_BLOCK`; after a reboot
-  counting resumes above the reserved block. Erased only by a building reset (which also replaces the key).
+  counting resumes above the reserved block. Erased by a building reset (which also replaces the key) or an NVS erase.
 - Peer counters: NVS namespace `db_ctr_peer`, one entry per MAC, written on every accepted message (messages are rare).
-  Not erased when a pairing is deleted, because the key stays the same and an old captured message would otherwise be
-  accepted again. A module reset erases the peer counters it holds (the panel's), not its own send counter.
+  The panel forgets a MAC's counter when it pairs that MAC with a new session. A module reset erases the peer counters
+  it holds (the panel's).
 - Same counter as the last accepted one = retry: the ACK is sent again, the action is not repeated.
 - A message whose counter cannot be stored is not accepted.
 
@@ -52,14 +60,14 @@ An ACK carries its own counter and the counter of the acknowledged request.
   `DB_CHANNEL_DWELL_MS` is therefore a shared option in `components/db_net/Kconfig`.
 - Channel: NVS `db_panel`; site scan at boot when missing. If the scan fails, the first candidate is used and nothing
   is stored, so the next boot scans again.
-- OPEN_DOOR is accepted only from the MAC registered for the message's apartment number.
+- OPEN_DOOR is accepted only from the MAC registered for the message's apartment number, in its current session.
 
 ### Apartment module
 - Identity (apartment, channel, panel MAC) in NVS `db_identity`; the key is stored by esp-now.
 - Pairing button (only when unpaired): responder on, channel hopping every `DB_CHANNEL_DWELL_MS`; after
   `ESP_EVENT_ESPNOW_SEC_OK` it stays on that channel and accepts `PAIR_CONFIG` only from that panel.
   A window that ends after the handshake but without configuration erases the key.
-- RING is accepted only from the stored panel MAC for the stored apartment number.
+- RING is accepted only from the stored panel MAC for the stored apartment number and session.
 - Reset button: erases identity, key and peer counters, then restarts.
 
 ## Consequences

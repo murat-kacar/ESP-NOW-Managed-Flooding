@@ -8,6 +8,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "espnow.h"
 #include "espnow_security.h"
@@ -72,27 +73,33 @@ static esp_err_t handshake(const uint8_t mac[6])
 
 esp_err_t pairing_run(uint8_t apartment)
 {
-    uint8_t mac[6];
-    if (registry_get(apartment, mac)) {
+    registry_entry_t entry;
+    if (registry_get(apartment, &entry)) {
         ESP_LOGW(TAG, "apartment %u is already registered (SPEC 5.2)", apartment);
         return ESP_ERR_INVALID_STATE;
     }
 
     ESP_LOGI(TAG, "pairing window open for apartment %u", apartment);
     db_status_led_start(DB_LED_PAIRING_WINDOW);
-    esp_err_t err = find_module(mac);
+    esp_err_t err = find_module(entry.mac);
     db_status_led_stop(DB_LED_PAIRING_WINDOW);
     if (err != ESP_OK) {
         return err;
     }
 
-    ESP_LOGI(TAG, "module " MACSTR " found", MAC2STR(mac));
-    ESP_RETURN_ON_ERROR(handshake(mac), TAG, "handshake failed");
+    ESP_LOGI(TAG, "module " MACSTR " found", MAC2STR(entry.mac));
+    ESP_RETURN_ON_ERROR(handshake(entry.mac), TAG, "handshake failed");
 
-    db_msg_t config = { .opcode = DB_OP_PAIR_CONFIG, .apartment = apartment, .channel = db_net_get_channel() };
-    ESP_RETURN_ON_ERROR(db_proto_request(mac, &config, DB_OP_PAIR_CONFIG_ACK, CONFIG_RETRIES), TAG,
+    /* A new session invalidates every message of an earlier pairing of this MAC, so its counter can restart
+     * (a reset or reflashed module counts from 1 again). */
+    entry.session = esp_random();
+    ESP_RETURN_ON_ERROR(db_proto_forget_peer(entry.mac), TAG, "forgetting the old counter failed");
+    db_msg_t config = {
+        .opcode = DB_OP_PAIR_CONFIG, .apartment = apartment, .channel = db_net_get_channel(), .session = entry.session,
+    };
+    ESP_RETURN_ON_ERROR(db_proto_request(entry.mac, &config, DB_OP_PAIR_CONFIG_ACK, CONFIG_RETRIES), TAG,
                         "configuration message not acknowledged");
-    ESP_RETURN_ON_ERROR(registry_add(apartment, mac), TAG, "registering failed");
+    ESP_RETURN_ON_ERROR(registry_add(apartment, &entry), TAG, "registering failed");
     ESP_LOGI(TAG, "apartment %u paired", apartment);
     return ESP_OK;
 }

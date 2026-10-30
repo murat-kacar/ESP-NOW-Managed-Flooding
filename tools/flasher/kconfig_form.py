@@ -49,21 +49,33 @@ def config_env_file(role: str) -> Path:
 
 
 def config_env_is_stale(role: str) -> bool:
-    """True if config.env is missing or older than a file that changes the Kconfig file list."""
-    env_file = config_env_file(role)
-    if not env_file.exists():
+    """True if config.env does not list exactly the Kconfig files of the role's build components.
+
+    Only the file list matters: the form parses the Kconfig files themselves, so content changes need no
+    reconfigure. File times cannot be used, because CMake's configure_file() keeps an unchanged config.env as is.
+    The build components come from ESP-IDF's project_description.json (written with config.env).
+    """
+    build_dir = REPO_ROOT / "apps" / role / "build"
+    env_file = build_dir / "config.env"
+    description_file = build_dir / "project_description.json"
+    if not env_file.is_file() or not description_file.is_file():
         return True
-    app = REPO_ROOT / "apps" / role
-    inputs = [
-        app / "CMakeLists.txt",
-        app / "dependencies.lock",
-        *app.glob("main/*"),
-        *(REPO_ROOT / "components").glob("*/Kconfig"),
-        *(REPO_ROOT / "components").glob("*/CMakeLists.txt"),
-        *(REPO_ROOT / "components").glob("*/idf_component.yml"),
-    ]
-    newest = max((p.stat().st_mtime for p in inputs if p.is_file()), default=0.0)
-    return env_file.stat().st_mtime < newest
+    env = json.loads(env_file.read_text(encoding="utf-8"))
+    listed = {
+        Path(path).resolve()
+        for key in ("COMPONENT_KCONFIGS", "COMPONENT_KCONFIGS_PROJBUILD")
+        for path in env.get(key, "").split(";") if path
+    }
+    if any(not path.is_file() for path in listed):
+        return True
+    description = json.loads(description_file.read_text(encoding="utf-8"))
+    expected = {
+        (Path(info["dir"]) / name).resolve()
+        for info in description.get("build_component_info", {}).values() if info.get("dir")
+        for name in ("Kconfig", "Kconfig.projbuild")
+        if (Path(info["dir"]) / name).is_file()
+    }
+    return not expected <= listed
 
 
 def load_kconfig(role: str) -> kc.Kconfig:

@@ -32,6 +32,7 @@ typedef struct {
     bool active;
     uint8_t dest[DB_MAC_LEN];
     uint8_t ack_opcode;
+    uint32_t session;
     uint32_t counter;
 } pending_request_t;
 
@@ -145,7 +146,8 @@ static void handle_ack(const rx_item_t *item)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool expected = s_pending.active && s_pending.ack_opcode == item->msg.opcode &&
-                    s_pending.counter == item->msg.ack_counter && memcmp(s_pending.dest, item->src, DB_MAC_LEN) == 0;
+                    s_pending.session == item->msg.session && s_pending.counter == item->msg.ack_counter &&
+                    memcmp(s_pending.dest, item->src, DB_MAC_LEN) == 0;
     xSemaphoreGive(s_lock);
     if (expected && db_proto_check_counter(item->src, item->msg.counter) == DB_REPLAY_NEW) {
         xSemaphoreGive(s_ack);
@@ -205,6 +207,7 @@ esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, c
     db_msg_t ack = {
         .opcode = ack_opcode,
         .apartment = request->apartment,
+        .session = request->session,
         .ack_counter = request->counter,
     };
     return db_proto_send(dest, &ack);
@@ -219,7 +222,9 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
         msg->version = DB_PROTO_VERSION;
         msg->counter = counter;
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        s_pending = (pending_request_t) { .active = true, .ack_opcode = ack_opcode, .counter = counter };
+        s_pending = (pending_request_t) {
+            .active = true, .ack_opcode = ack_opcode, .session = msg->session, .counter = counter,
+        };
         memcpy(s_pending.dest, dest, DB_MAC_LEN);
         xSemaphoreGive(s_lock);
         xSemaphoreTake(s_ack, 0);  /* drop a stale signal */
@@ -261,6 +266,23 @@ db_replay_t db_proto_check_counter(const uint8_t src[DB_MAC_LEN], uint32_t count
         return DB_REPLAY_OLD;
     }
     return DB_REPLAY_NEW;
+}
+
+esp_err_t db_proto_forget_peer(const uint8_t mac[DB_MAC_LEN])
+{
+    char key[13];
+    mac_to_key(mac, key);
+    nvs_handle_t nvs;
+    ESP_RETURN_ON_ERROR(nvs_open(NS_PEER_COUNTER, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
+    esp_err_t err = nvs_erase_key(nvs, key);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return err;
 }
 
 esp_err_t db_proto_erase_peer_counters(void)

@@ -11,15 +11,15 @@
 
 static const char *TAG = "registry";
 
-#define NVS_NAMESPACE  "db_registry"
+#define NVS_NAMESPACE   "db_registry"
 #define APARTMENT_SLOTS 256  /* apartment numbers are 8 bits */
 
 typedef struct {
     bool used;
-    uint8_t mac[6];
-} entry_t;
+    registry_entry_t entry;
+} slot_t;
 
-static entry_t s_entries[APARTMENT_SLOTS];
+static slot_t s_slots[APARTMENT_SLOTS];
 static SemaphoreHandle_t s_lock;
 
 static void key_for(uint8_t apartment, char key[8])
@@ -39,9 +39,10 @@ esp_err_t registry_init(void)
     for (int apartment = CONFIG_DB_APARTMENT_MIN; apartment <= CONFIG_DB_APARTMENT_MAX; apartment++) {
         char key[8];
         key_for(apartment, key);
-        size_t size = sizeof(s_entries[apartment].mac);
-        if (nvs_get_blob(nvs, key, s_entries[apartment].mac, &size) == ESP_OK && size == 6) {
-            s_entries[apartment].used = true;
+        registry_entry_t entry;
+        size_t size = sizeof(entry);
+        if (nvs_get_blob(nvs, key, &entry, &size) == ESP_OK && size == sizeof(entry)) {
+            s_slots[apartment] = (slot_t) { .used = true, .entry = entry };
             count++;
         }
     }
@@ -50,24 +51,25 @@ esp_err_t registry_init(void)
     return ESP_OK;
 }
 
-bool registry_get(uint8_t apartment, uint8_t mac[6])
+bool registry_get(uint8_t apartment, registry_entry_t *entry)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool used = s_entries[apartment].used;
+    bool used = s_slots[apartment].used;
     if (used) {
-        memcpy(mac, s_entries[apartment].mac, 6);
+        *entry = s_slots[apartment].entry;
     }
     xSemaphoreGive(s_lock);
     return used;
 }
 
-bool registry_find(const uint8_t mac[6], uint8_t *apartment)
+bool registry_find(const uint8_t mac[6], uint8_t *apartment, registry_entry_t *entry)
 {
     bool found = false;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (int i = 0; i < APARTMENT_SLOTS && !found; i++) {
-        if (s_entries[i].used && memcmp(s_entries[i].mac, mac, 6) == 0) {
+        if (s_slots[i].used && memcmp(s_slots[i].entry.mac, mac, 6) == 0) {
             *apartment = (uint8_t)i;
+            *entry = s_slots[i].entry;
             found = true;
         }
     }
@@ -75,13 +77,13 @@ bool registry_find(const uint8_t mac[6], uint8_t *apartment)
     return found;
 }
 
-static esp_err_t nvs_update(uint8_t apartment, const uint8_t *mac)
+static esp_err_t nvs_update(uint8_t apartment, const registry_entry_t *entry)
 {
     nvs_handle_t nvs;
     ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
     char key[8];
     key_for(apartment, key);
-    esp_err_t err = mac ? nvs_set_blob(nvs, key, mac, 6) : nvs_erase_key(nvs, key);
+    esp_err_t err = entry ? nvs_set_blob(nvs, key, entry, sizeof(*entry)) : nvs_erase_key(nvs, key);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK;
     }
@@ -92,13 +94,12 @@ static esp_err_t nvs_update(uint8_t apartment, const uint8_t *mac)
     return err;
 }
 
-esp_err_t registry_add(uint8_t apartment, const uint8_t mac[6])
+esp_err_t registry_add(uint8_t apartment, const registry_entry_t *entry)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    esp_err_t err = s_entries[apartment].used ? ESP_ERR_INVALID_STATE : nvs_update(apartment, mac);
+    esp_err_t err = s_slots[apartment].used ? ESP_ERR_INVALID_STATE : nvs_update(apartment, entry);
     if (err == ESP_OK) {
-        s_entries[apartment].used = true;
-        memcpy(s_entries[apartment].mac, mac, 6);
+        s_slots[apartment] = (slot_t) { .used = true, .entry = *entry };
     }
     xSemaphoreGive(s_lock);
     return err;
@@ -109,7 +110,7 @@ esp_err_t registry_remove(uint8_t apartment)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     esp_err_t err = nvs_update(apartment, NULL);
     if (err == ESP_OK) {
-        s_entries[apartment].used = false;
+        s_slots[apartment].used = false;
     }
     xSemaphoreGive(s_lock);
     return err;
@@ -125,7 +126,7 @@ esp_err_t registry_erase_all(void)
     }
     nvs_close(nvs);
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    memset(s_entries, 0, sizeof(s_entries));
+    memset(s_slots, 0, sizeof(s_slots));
     xSemaphoreGive(s_lock);
     return err;
 }

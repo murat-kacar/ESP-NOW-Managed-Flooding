@@ -19,7 +19,9 @@ Left column (once per batch):
 3. Configuration: a form generated from the role's full ESP-IDF Kconfig tree with `esp_kconfiglib` (ESP-IDF's menuconfig library).
    Loading follows ESP-IDF kconfgen: the environment from `apps/<role>/build/config.env` is applied, `<IDF_PATH>/Kconfig` is parsed
    and `sdkconfig.defaults` is loaded, so defaults and visibility match `idf.py menuconfig`.
-   If `config.env` is missing or older than a Kconfig/CMake input, the GUI runs `idf.py reconfigure` first (configure only, no compilation).
+   If `config.env` does not list exactly the Kconfig files of the build components in ESP-IDF's
+   `project_description.json`, the GUI runs `idf.py reconfigure` once (configure only, no compilation).
+   File times are not used: CMake's `configure_file()` leaves an unchanged `config.env` untouched.
    Shown sections: every "Doorbell ..." menu, the espressif/esp-now, IoT Button and LED Indicator menus, and selected ESP-IDF options
    (CPU frequency, brownout, task and interrupt watchdogs, console UART and baud rate, flash mode/frequency/size, log level).
    Kconfig is the single source of truth for every adjustable parameter, its range, default and help text.
