@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -9,7 +10,7 @@ extern "C" {
 #endif
 
 #define DB_PROTO_VERSION 1
-#define DB_MAC_LEN       6
+#define DB_MAC_LEN       6   /**< equals ESPNOW_ADDR_LEN (checked in db_proto.c) */
 #define DB_TAG_LEN       16  /**< truncated HMAC-SHA256 authentication tag */
 
 /** Application message opcodes (SPEC 7.2). */
@@ -25,7 +26,8 @@ typedef enum {
 } db_opcode_t;
 
 /**
- * Application message. On air it is followed by a DB_TAG_LEN tag:
+ * Application message, sent as is: multi-byte fields are little-endian (both roles run on ESP32; checked at
+ * build time in db_proto.c). On air it is followed by a DB_TAG_LEN tag:
  * HMAC-SHA256(K_auth, src MAC || dest MAC || message), truncated, where K_auth = HKDF-Expand(app key,
  * "doorbell message auth", 32) (RFC 5869; Extract is skipped because the app key is uniformly random).
  * esp-now hands plaintext and decrypted frames to the application in the same way, so authenticity is checked
@@ -41,19 +43,14 @@ typedef struct __attribute__((packed)) {
     uint32_t ack_counter;  /**< ACK opcodes: counter of the acknowledged request; otherwise 0 */
 } db_msg_t;
 
-/** Result of a replay check (ADR 0002). */
-typedef enum {
-    DB_REPLAY_NEW,    /**< Counter is higher than the last accepted one; it is now stored */
-    DB_REPLAY_RETRY,  /**< Counter equals the last accepted one: a retry; reply again, do not repeat the action */
-    DB_REPLAY_OLD,    /**< Counter is lower: drop */
-} db_replay_t;
-
 /**
- * @brief Called in the protocol task for every valid non-ACK message.
+ * @brief Called in the protocol task for every authenticated non-ACK message that passed the replay check
+ * (ADR 0002): its counter is higher than, or equal to, the last one accepted from that sender.
  *
- * The handler checks that the sender is known before calling db_proto_check_counter().
+ * @param retry  true when the counter equals the last accepted one: a retry of a message already delivered.
+ *               Reply again, do not repeat the action (SPEC 7.4).
  */
-typedef void (*db_proto_handler_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg);
+typedef void (*db_proto_handler_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool retry);
 
 /**
  * @brief Called in the protocol task for an unauthenticated pairing discovery frame (DB_OP_PAIR_HELLO or
@@ -61,7 +58,12 @@ typedef void (*db_proto_handler_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t
  */
 typedef void (*db_proto_hello_handler_t)(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode);
 
-/** @brief Register the esp-now data handler and start the protocol task. db_net_init() must run first. */
+/**
+ * @brief Register the esp-now data handler and start the protocol task. db_net_init() must run first.
+ *
+ * @return ESP_FAIL or an NVS error if the stored send counter cannot be read: sending with an unknown counter could
+ *         reuse values.
+ */
 esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_hello_handler_t hello_handler);
 
 /** @brief Send a pairing discovery frame (plaintext, not forwarded). dest may be the broadcast address. */
@@ -84,9 +86,6 @@ esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, c
  *         Call from a task that may block; one request at a time per device.
  */
 esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opcode_t ack_opcode, int retries);
-
-/** @brief Compare a sender's counter with the last accepted one and store it when new. */
-db_replay_t db_proto_check_counter(const uint8_t src[DB_MAC_LEN], uint32_t counter);
 
 /**
  * @brief Forget one peer's counter. Only safe together with a new session: messages captured in the old

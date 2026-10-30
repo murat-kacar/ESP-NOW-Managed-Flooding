@@ -24,6 +24,11 @@ Facts from the espressif/esp-now 2.5.3 sources (`managed_components/espressif__e
 - `db_proto`: message format, authentication tag, replay counters, ACK and retries. Frames: broadcast,
   `security = true`, `dest_addr` = peer MAC, TTL/RSSI/retransmit/weak-signal filter from Kconfig. The esp-now handler
   only copies the frame to a queue; a protocol task processes it (SPEC 7.1).
+- `db_nvs`: one-shot accessors for the default NVS partition (open, one operation, commit, close), used by every
+  module that stores data, so the NVS handle pattern exists once.
+- `db_status_led`: a best-effort indicator; its start and stop functions return nothing and log their own errors.
+  Other ignored return values are either checked with `ESP_ERROR_CHECK_WITHOUT_ABORT` or cast to `(void)` where the
+  error is expected (stopping a timer that is not running).
 
 ### Message authentication
 esp-now 2.5.3 delivers a frame received without encryption to the data handler exactly like a decrypted one
@@ -45,6 +50,8 @@ waits on a channel only until the panel answers, and the panel starts the handsh
 ### Message
 `version, opcode, apartment, channel, session, counter, ack_counter` (16 bytes) plus the 16-byte tag. Opcodes 1-4 as
 in SPEC 7.2, plus `PAIR_CONFIG` (5, panel to module: apartment, channel and session) and `PAIR_CONFIG_ACK` (6).
+The packed in-memory layout is the wire format, with little-endian fields; both roles run on ESP32, and the byte order
+and frame sizes are checked with `_Static_assert` in `db_proto.c`.
 An ACK carries its own counter, the counter of the acknowledged request and the request's session.
 
 ### Pairing session
@@ -61,8 +68,13 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
 - Peer counters: NVS namespace `db_ctr_peer`, one entry per MAC, written on every accepted message (messages are rare).
   The panel forgets a MAC's counter when it pairs that MAC with a new session. A module reset erases the peer counters
   it holds (the panel's).
-- Same counter as the last accepted one = retry: the ACK is sent again, the action is not repeated.
-- A message whose counter cannot be stored is not accepted.
+- The check runs once, in `db_proto`, for every authenticated frame before it is dispatched (as the anti-replay
+  check of IPsec, DTLS and the BLE Mesh network layer): a lower counter is dropped, a higher one is stored. The
+  application handler gets a `retry` flag instead of calling the check itself.
+- Same counter as the last accepted one = retry: the ACK is sent again, the action is not repeated. A repeated ACK is
+  ignored.
+- A message whose counter cannot be read or stored is not accepted. If the own send counter cannot be read at boot,
+  `db_proto_init()` fails rather than risk reusing counters.
 
 ### Panel
 - Keypad: espressif/button matrix (row-major, key map from Kconfig); keys are processed in one application task.

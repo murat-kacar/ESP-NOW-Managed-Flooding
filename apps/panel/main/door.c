@@ -28,22 +28,22 @@ static esp_timer_handle_t s_relay_timer;
 static esp_timer_handle_t s_buzzer_timer;
 static atomic_bool s_open;
 
-static void buzzer_set(uint32_t duty)
+static esp_err_t buzzer_set(uint32_t duty)
 {
-    ledc_set_duty(BUZZER_MODE, BUZZER_CHANNEL, duty);
-    ledc_update_duty(BUZZER_MODE, BUZZER_CHANNEL);
+    ESP_RETURN_ON_ERROR(ledc_set_duty(BUZZER_MODE, BUZZER_CHANNEL, duty), TAG, "buzzer duty failed");
+    return ledc_update_duty(BUZZER_MODE, BUZZER_CHANNEL);
 }
 
 static void relay_end(void *arg)
 {
-    gpio_set_level(CONFIG_DB_DOOR_RELAY_GPIO, RELAY_OFF_LEVEL);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_set_level(CONFIG_DB_DOOR_RELAY_GPIO, RELAY_OFF_LEVEL));
     db_status_led_stop(DB_LED_DOOR_OPEN);
     atomic_store(&s_open, false);
 }
 
 static void buzzer_end(void *arg)
 {
-    buzzer_set(0);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(buzzer_set(0));
 }
 
 esp_err_t door_init(void)
@@ -92,12 +92,24 @@ esp_err_t door_open(void)
     if (!atomic_compare_exchange_strong(&s_open, &expected, true)) {
         return ESP_OK;  /* pulse active: ignored */
     }
-    ESP_RETURN_ON_ERROR(gpio_set_level(CONFIG_DB_DOOR_RELAY_GPIO, RELAY_ON_LEVEL), TAG, "set level failed");
-    db_status_led_start(DB_LED_DOOR_OPEN);
-    if (CONFIG_DB_BUZZER_DURATION_MS > 0) {
-        buzzer_set(BUZZER_DUTY);
-        esp_timer_start_once(s_buzzer_timer, (uint64_t)CONFIG_DB_BUZZER_DURATION_MS * 1000U);
+    esp_err_t err = gpio_set_level(CONFIG_DB_DOOR_RELAY_GPIO, RELAY_ON_LEVEL);
+    if (err != ESP_OK) {
+        atomic_store(&s_open, false);
+        ESP_LOGE(TAG, "relay on failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    db_status_led_start(DB_LED_DOOR_OPEN);  /* before the timer, so relay_end() always runs after it */
+    err = esp_timer_start_once(s_relay_timer, (uint64_t)CONFIG_DB_DOOR_PULSE_MS * 1000U);
+    if (err != ESP_OK) {
+        relay_end(NULL);  /* no timer would end the pulse: release the relay now */
+        ESP_LOGE(TAG, "relay timer failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    if (CONFIG_DB_BUZZER_DURATION_MS > 0 && ESP_ERROR_CHECK_WITHOUT_ABORT(buzzer_set(BUZZER_DUTY)) == ESP_OK &&
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_once(s_buzzer_timer,
+                                          (uint64_t)CONFIG_DB_BUZZER_DURATION_MS * 1000U)) != ESP_OK) {
+        buzzer_end(NULL);  /* no timer would end the tone: stop it now */
     }
     ESP_LOGI(TAG, "door open");
-    return esp_timer_start_once(s_relay_timer, (uint64_t)CONFIG_DB_DOOR_PULSE_MS * 1000U);
+    return ESP_OK;
 }

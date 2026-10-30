@@ -35,7 +35,7 @@ static void clear(void)
 {
     s_length = 0;
     s_buffer[0] = '\0';
-    esp_timer_stop(s_timeout_timer);
+    (void)esp_timer_stop(s_timeout_timer);  /* ESP_ERR_INVALID_STATE when not running is expected */
     db_status_led_stop(DB_LED_COMMAND_ENTRY);
 }
 
@@ -205,8 +205,9 @@ void input_key(char key)
     if (s_length == 1) {
         db_status_led_start(DB_LED_COMMAND_ENTRY);
     }
-    esp_timer_stop(s_timeout_timer);
-    esp_timer_start_once(s_timeout_timer, (uint64_t)CONFIG_DB_KEYPAD_INPUT_TIMEOUT_S * 1000000U);
+    (void)esp_timer_stop(s_timeout_timer);  /* ESP_ERR_INVALID_STATE when not running is expected */
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        esp_timer_start_once(s_timeout_timer, (uint64_t)CONFIG_DB_KEYPAD_INPUT_TIMEOUT_S * 1000000U));
 }
 
 void input_timeout(void)

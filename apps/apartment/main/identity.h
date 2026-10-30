@@ -3,13 +3,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "db_proto.h"
 #include "esp_err.h"
 
 /** Pairing result stored in NVS (SPEC 5.1). The application key is stored by esp-now itself. */
 typedef struct {
     uint8_t apartment;
     uint8_t channel;
-    uint8_t panel_mac[6];
+    uint8_t panel_mac[DB_MAC_LEN];
     uint32_t session;  /**< pairing session from PAIR_CONFIG; carried by every message */
 } identity_t;
 

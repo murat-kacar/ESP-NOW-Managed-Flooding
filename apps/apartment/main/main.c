@@ -48,22 +48,22 @@ static bool get_identity(identity_t *out)
     return paired;
 }
 
-static void handle_pair_config(const uint8_t src[6], const db_msg_t *msg)
+static void handle_pair_config(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool retry)
 {
     identity_t current;
     if (get_identity(&current)) {
         /* The panel did not get our ACK and retried with the same counter: acknowledge again. */
-        if (memcmp(src, current.panel_mac, sizeof(current.panel_mac)) == 0 && msg->apartment == current.apartment &&
-                msg->session == current.session && db_proto_check_counter(src, msg->counter) == DB_REPLAY_RETRY) {
-            db_proto_ack(src, DB_OP_PAIR_CONFIG_ACK, msg);
+        if (retry && memcmp(src, current.panel_mac, DB_MAC_LEN) == 0 && msg->apartment == current.apartment &&
+                msg->session == current.session) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_PAIR_CONFIG_ACK, msg));
         }
         return;
     }
-    if (!pairing_is_expected_panel(src) || db_proto_check_counter(src, msg->counter) != DB_REPLAY_NEW) {
+    if (retry || !pairing_is_expected_panel(src)) {
         return;
     }
     identity_t identity = { .apartment = msg->apartment, .channel = msg->channel, .session = msg->session };
-    memcpy(identity.panel_mac, src, sizeof(identity.panel_mac));
+    memcpy(identity.panel_mac, src, DB_MAC_LEN);
     if (identity_save(&identity) != ESP_OK) {
         ESP_LOGE(TAG, "storing the identity failed");
         pairing_finish(false);
@@ -74,8 +74,8 @@ static void handle_pair_config(const uint8_t src[6], const db_msg_t *msg)
     s_paired = true;
     xSemaphoreGive(s_identity_lock);
 
-    db_net_set_channel(identity.channel);
-    db_proto_ack(src, DB_OP_PAIR_CONFIG_ACK, msg);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(db_net_set_channel(identity.channel));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_PAIR_CONFIG_ACK, msg));
     pairing_finish(true);
     ESP_LOGI(TAG, "paired as apartment %u on channel %u", identity.apartment, identity.channel);
 
@@ -83,36 +83,28 @@ static void handle_pair_config(const uint8_t src[6], const db_msg_t *msg)
     db_status_led_stop(DB_LED_UNPAIRED);
     db_status_led_start(DB_LED_PAIRED_IDLE);
     db_status_led_start(DB_LED_SUCCESS);
-    bell_ring();
+    ESP_ERROR_CHECK_WITHOUT_ABORT(bell_ring());
 }
 
-/* Runs in the db_proto task. */
-static void on_message(const uint8_t src[6], const db_msg_t *msg)
+/* Runs in the db_proto task, after authentication and the replay check. */
+static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool retry)
 {
     if (msg->opcode == DB_OP_PAIR_CONFIG) {
-        handle_pair_config(src, msg);
+        handle_pair_config(src, msg, retry);
         return;
     }
     identity_t identity;
-    if (!get_identity(&identity) || memcmp(src, identity.panel_mac, sizeof(identity.panel_mac)) != 0) {
+    if (!get_identity(&identity) || memcmp(src, identity.panel_mac, DB_MAC_LEN) != 0) {
         return;  /* only the paired panel is accepted */
     }
     if (msg->opcode != DB_OP_RING || msg->apartment != identity.apartment || msg->session != identity.session) {
         return;  /* messages of an earlier pairing session are dropped */
     }
-    switch (db_proto_check_counter(src, msg->counter)) {
-    case DB_REPLAY_NEW:
+    if (!retry) {  /* a retry is acknowledged again, the bell does not ring twice */
         ESP_LOGI(TAG, "ring");
-        bell_ring();
-        db_proto_ack(src, DB_OP_RING_ACK, msg);
-        break;
-    case DB_REPLAY_RETRY:
-        db_proto_ack(src, DB_OP_RING_ACK, msg);  /* a retry: acknowledge again, do not ring twice */
-        break;
-    case DB_REPLAY_OLD:
-        ESP_LOGW(TAG, "old RING counter %u dropped", (unsigned)msg->counter);
-        break;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(bell_ring());
     }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_RING_ACK, msg));
 }
 
 static void request_door_open(void)
@@ -194,11 +186,11 @@ void app_main(void)
     }
     if (s_paired) {
         ESP_ERROR_CHECK(db_net_set_channel(s_identity.channel));
-        ESP_ERROR_CHECK(db_status_led_start(DB_LED_PAIRED_IDLE));
+        db_status_led_start(DB_LED_PAIRED_IDLE);
         ESP_LOGI(TAG, "apartment %u, panel " MACSTR ", channel %u", s_identity.apartment,
                  MAC2STR(s_identity.panel_mac), s_identity.channel);
     } else {
-        ESP_ERROR_CHECK(db_status_led_start(DB_LED_UNPAIRED));
+        db_status_led_start(DB_LED_UNPAIRED);
         ESP_LOGI(TAG, "not paired");
     }
 

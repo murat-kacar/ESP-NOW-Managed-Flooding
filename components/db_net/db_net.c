@@ -2,6 +2,7 @@
 
 #include <limits.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "esp_check.h"
 #include "esp_event.h"
@@ -23,7 +24,12 @@ static const char *TAG = "db_net";
 #define TX_POWER_QUARTER_DBM 80
 #endif
 
-static bool s_has_key;
+/* Use the key for encryption and decryption; esp-now stores it (esp-now examples/security). */
+static esp_err_t install_key(uint8_t key_info[APP_KEY_LEN])
+{
+    ESP_RETURN_ON_ERROR(espnow_set_key(key_info), TAG, "set key failed");
+    return espnow_set_dec_key(key_info);
+}
 
 /* Order follows ESP-IDF examples/wifi/espnow and esp-now examples/get-started. */
 static esp_err_t wifi_init(void)
@@ -63,13 +69,12 @@ esp_err_t db_net_init(void)
     ESP_RETURN_ON_ERROR(espnow_init(&espnow_config), TAG, "espnow_init failed");
 
     uint8_t key_info[APP_KEY_LEN];
-    if (espnow_get_key(key_info) == ESP_OK) {
-        ESP_RETURN_ON_ERROR(espnow_set_key(key_info), TAG, "set key failed");
-        ESP_RETURN_ON_ERROR(espnow_set_dec_key(key_info), TAG, "set decryption key failed");
-        s_has_key = true;
-    }
+    bool has_key = espnow_get_key(key_info) == ESP_OK;
+    esp_err_t err = has_key ? install_key(key_info) : ESP_OK;
+    memset(key_info, 0, sizeof(key_info));
+    ESP_RETURN_ON_ERROR(err, TAG, "loading the stored key failed");
     ESP_LOGI(TAG, "TX power %d (0.25 dBm units), application key %s", TX_POWER_QUARTER_DBM,
-             s_has_key ? "loaded" : "not set");
+             has_key ? "loaded" : "not set");
     return ESP_OK;
 }
 
@@ -82,7 +87,7 @@ uint8_t db_net_get_channel(void)
 {
     uint8_t primary = 0;
     wifi_second_chan_t second;
-    esp_wifi_get_channel(&primary, &second);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_get_channel(&primary, &second));  /* 0 on failure */
     return primary;
 }
 
@@ -136,10 +141,11 @@ esp_err_t db_net_scan_best_channel(uint8_t *channel)
 
 bool db_net_has_key(void)
 {
-    /* Read the component's state: an espnow_sec responder stores the key itself after the handshake. */
+    /* esp-now owns the key state: an espnow_sec responder stores the key itself after the handshake. */
     uint8_t key_info[APP_KEY_LEN];
-    s_has_key = espnow_get_key(key_info) == ESP_OK;
-    return s_has_key;
+    bool has_key = espnow_get_key(key_info) == ESP_OK;
+    memset(key_info, 0, sizeof(key_info));
+    return has_key;
 }
 
 esp_err_t db_net_ensure_key(void)
@@ -149,24 +155,17 @@ esp_err_t db_net_ensure_key(void)
     }
     uint8_t key_info[APP_KEY_LEN];
     esp_fill_random(key_info, sizeof(key_info));
-    ESP_RETURN_ON_ERROR(espnow_set_key(key_info), TAG, "set key failed");
-    ESP_RETURN_ON_ERROR(espnow_set_dec_key(key_info), TAG, "set decryption key failed");
-    s_has_key = true;
-    return ESP_OK;
+    esp_err_t err = install_key(key_info);
+    memset(key_info, 0, sizeof(key_info));
+    return err;
 }
 
 esp_err_t db_net_erase_key(void)
 {
     esp_err_t err = espnow_erase_key();
     esp_err_t dec = espnow_erase_dec_key();
-    s_has_key = false;
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         return err;
     }
     return (dec == ESP_ERR_NVS_NOT_FOUND) ? ESP_OK : dec;
-}
-
-esp_err_t db_net_get_mac(uint8_t mac[6])
-{
-    return esp_wifi_get_mac(WIFI_IF_STA, mac);
 }

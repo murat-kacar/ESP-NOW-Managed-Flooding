@@ -21,15 +21,13 @@ static const char *TAG = "pairing";
 #define DISCOVERY_TASK_STACK 3072
 #define DISCOVERY_TASK_PRIO  4
 
-static const uint8_t s_broadcast[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
-
 static SemaphoreHandle_t s_lock;
 static esp_timer_handle_t s_window_timer;
 static TaskHandle_t s_discovery_task;
 static bool s_active;
 static bool s_found;            /* the panel answered our HELLO: stay on this channel */
 static bool s_handshake_done;
-static uint8_t s_panel_mac[6];  /* from HELLO_ACK, confirmed by ESP_EVENT_ESPNOW_SEC_OK */
+static uint8_t s_panel_mac[DB_MAC_LEN];  /* from HELLO_ACK, confirmed by ESP_EVENT_ESPNOW_SEC_OK */
 static uint8_t s_channels[DB_CHANNEL_CANDIDATE_COUNT];
 
 static bool is_active(void)
@@ -44,8 +42,9 @@ static bool is_active(void)
 static void discovery_task(void *arg)
 {
     for (int i = 0; is_active(); i = (i + 1) % DB_CHANNEL_CANDIDATE_COUNT) {
-        db_net_set_channel(s_channels[i]);
-        db_proto_send_hello(s_broadcast, DB_OP_PAIR_HELLO);
+        if (ESP_ERROR_CHECK_WITHOUT_ABORT(db_net_set_channel(s_channels[i])) == ESP_OK) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_send_hello(ESPNOW_ADDR_BROADCAST, DB_OP_PAIR_HELLO));
+        }
         /* Woken early by HELLO_ACK or by the end of the window. */
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CONFIG_DB_CHANNEL_DWELL_MS));
     }
@@ -58,7 +57,7 @@ static void discovery_task(void *arg)
     vTaskDelete(NULL);
 }
 
-void pairing_on_hello(const uint8_t src[6], db_opcode_t opcode)
+void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode)
 {
     if (opcode != DB_OP_PAIR_HELLO_ACK) {
         return;
@@ -66,7 +65,7 @@ void pairing_on_hello(const uint8_t src[6], db_opcode_t opcode)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (s_active && !s_found) {
         s_found = true;
-        memcpy(s_panel_mac, src, sizeof(s_panel_mac));
+        memcpy(s_panel_mac, src, DB_MAC_LEN);
         if (s_discovery_task) {
             xTaskNotifyGive(s_discovery_task);
         }
@@ -85,7 +84,7 @@ static void on_espnow_event(void *arg, esp_event_base_t base, int32_t id, void *
     if (id == ESP_EVENT_ESPNOW_SEC_OK) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         /* Only the panel that answered our HELLO may complete the pairing. */
-        if (s_active && s_found && memcmp(data, s_panel_mac, sizeof(s_panel_mac)) == 0) {
+        if (s_active && s_found && memcmp(data, s_panel_mac, DB_MAC_LEN) == 0) {
             s_handshake_done = true;
             ESP_LOGI(TAG, "handshake with panel " MACSTR " on channel %u", MAC2STR(s_panel_mac),
                      db_net_get_channel());
@@ -139,10 +138,10 @@ esp_err_t pairing_start(void)
     return ESP_OK;
 }
 
-bool pairing_is_expected_panel(const uint8_t mac[6])
+bool pairing_is_expected_panel(const uint8_t mac[DB_MAC_LEN])
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool expected = s_active && s_handshake_done && memcmp(mac, s_panel_mac, sizeof(s_panel_mac)) == 0;
+    bool expected = s_active && s_handshake_done && memcmp(mac, s_panel_mac, DB_MAC_LEN) == 0;
     xSemaphoreGive(s_lock);
     return expected;
 }
@@ -162,12 +161,12 @@ void pairing_finish(bool success)
         return;
     }
 
-    esp_timer_stop(s_window_timer);
-    espnow_sec_responder_stop();
+    (void)esp_timer_stop(s_window_timer);  /* not running when the window expired */
+    ESP_ERROR_CHECK_WITHOUT_ABORT(espnow_sec_responder_stop());
     db_status_led_stop(DB_LED_PAIRING_MODE);
     if (!success) {
         /* An unpaired module holds no key. The responder stores the key of whichever initiator completed the
          * handshake first, even one that is not the panel that answered our HELLO, so erase it unconditionally. */
-        db_net_erase_key();
+        ESP_ERROR_CHECK_WITHOUT_ABORT(db_net_erase_key());
     }
 }

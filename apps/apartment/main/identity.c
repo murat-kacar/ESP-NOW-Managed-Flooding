@@ -1,6 +1,7 @@
 #include "identity.h"
 
-#include "esp_check.h"
+#include "db_nvs.h"
+#include "esp_log.h"
 #include "nvs.h"
 
 static const char *TAG = "identity";
@@ -10,36 +11,19 @@ static const char *TAG = "identity";
 
 bool identity_load(identity_t *out)
 {
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
-        return false;
+    esp_err_t err = db_nvs_get_blob(NVS_NAMESPACE, NVS_KEY, out, sizeof(*out));
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "stored identity unreadable (%s): treated as unpaired", esp_err_to_name(err));
     }
-    size_t size = sizeof(*out);
-    esp_err_t err = nvs_get_blob(nvs, NVS_KEY, out, &size);
-    nvs_close(nvs);
-    return err == ESP_OK && size == sizeof(*out);
+    return err == ESP_OK;
 }
 
 esp_err_t identity_save(const identity_t *identity)
 {
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
-    esp_err_t err = nvs_set_blob(nvs, NVS_KEY, identity, sizeof(*identity));
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
+    return db_nvs_set_blob(NVS_NAMESPACE, NVS_KEY, identity, sizeof(*identity));
 }
 
 esp_err_t identity_erase(void)
 {
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
-    esp_err_t err = nvs_erase_all(nvs);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
+    return db_nvs_erase_namespace(NVS_NAMESPACE);
 }

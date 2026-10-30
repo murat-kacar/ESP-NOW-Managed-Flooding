@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "db_nvs.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "nvs.h"
@@ -90,38 +91,19 @@ bool codes_is_valid(const char *text, int length)
     return true;
 }
 
-static esp_err_t store(const char *key, const char *code)
-{
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(USER_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
-    esp_err_t err = nvs_set_str(nvs, key, code);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
-}
-
 esp_err_t codes_set_user(const char *code)
 {
     ESP_RETURN_ON_FALSE(codes_is_valid(code, CONFIG_DB_USER_CODE_LENGTH), ESP_ERR_INVALID_ARG, TAG, "invalid code");
-    return store(KEY_USER, code);
+    return db_nvs_set_str(USER_NAMESPACE, KEY_USER, code);
 }
 
 esp_err_t codes_set_admin(const char *code)
 {
     ESP_RETURN_ON_FALSE(codes_is_valid(code, CONFIG_DB_ADMIN_CODE_LENGTH), ESP_ERR_INVALID_ARG, TAG, "invalid code");
-    return store(KEY_ADMIN, code);
+    return db_nvs_set_str(USER_NAMESPACE, KEY_ADMIN, code);
 }
 
 esp_err_t codes_reset(void)
 {
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(USER_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
-    esp_err_t err = nvs_erase_all(nvs);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
+    return db_nvs_erase_namespace(USER_NAMESPACE);
 }

@@ -27,7 +27,7 @@ static const char *TAG = "pairing";
 static SemaphoreHandle_t s_lock;
 static SemaphoreHandle_t s_hello_seen;
 static bool s_window_open;
-static uint8_t s_modules[MAX_MODULES][6];
+static uint8_t s_modules[MAX_MODULES][DB_MAC_LEN];
 static int s_module_count;
 
 esp_err_t pairing_init(void)
@@ -38,7 +38,7 @@ esp_err_t pairing_init(void)
     return ESP_OK;
 }
 
-void pairing_on_hello(const uint8_t src[6], db_opcode_t opcode)
+void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode)
 {
     if (opcode != DB_OP_PAIR_HELLO) {
         return;
@@ -47,22 +47,22 @@ void pairing_on_hello(const uint8_t src[6], db_opcode_t opcode)
     if (s_window_open) {
         bool known = false;
         for (int i = 0; i < s_module_count; i++) {
-            known |= memcmp(s_modules[i], src, 6) == 0;
+            known |= memcmp(s_modules[i], src, DB_MAC_LEN) == 0;
         }
         if (!known && s_module_count < MAX_MODULES) {
-            memcpy(s_modules[s_module_count++], src, 6);
+            memcpy(s_modules[s_module_count++], src, DB_MAC_LEN);
         }
         xSemaphoreGive(s_hello_seen);
     }
     xSemaphoreGive(s_lock);
 }
 
-static int module_count(uint8_t first[6])
+static int module_count(uint8_t first[DB_MAC_LEN])
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     int count = s_module_count;
     if (count > 0) {
-        memcpy(first, s_modules[0], 6);
+        memcpy(first, s_modules[0], DB_MAC_LEN);
     }
     xSemaphoreGive(s_lock);
     return count;
@@ -83,26 +83,26 @@ static TickType_t ticks_until(int64_t deadline_us)
     return remaining_us > 0 ? pdMS_TO_TICKS(remaining_us / 1000) : 0;
 }
 
-static esp_err_t handshake(const uint8_t mac[6])
+static esp_err_t handshake(const uint8_t mac[DB_MAC_LEN])
 {
     ESP_RETURN_ON_ERROR(db_net_ensure_key(), TAG, "no application key");
     uint8_t key_info[APP_KEY_LEN];
     ESP_RETURN_ON_ERROR(espnow_get_key(key_info), TAG, "reading the key failed");
 
-    uint8_t addrs[1][6];
-    memcpy(addrs[0], mac, 6);
+    uint8_t addrs[1][DB_MAC_LEN];
+    memcpy(addrs[0], mac, DB_MAC_LEN);
     espnow_sec_result_t result = { 0 };
     esp_err_t err = espnow_sec_initiator_start(key_info, DB_SEC_POP, addrs, 1, &result);
     memset(key_info, 0, sizeof(key_info));
     if (err == ESP_OK && result.successed_num != 1) {
         err = ESP_FAIL;
     }
-    espnow_sec_initiator_result_free(&result);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(espnow_sec_initiator_result_free(&result));
     return err;
 }
 
 /* Discovery and handshake inside the window; retries the handshake until the window ends. */
-static esp_err_t find_and_handshake(uint8_t mac[6])
+static esp_err_t find_and_handshake(uint8_t mac[DB_MAC_LEN])
 {
     const int64_t deadline_us = esp_timer_get_time() + (int64_t)CONFIG_DB_PAIRING_WINDOW_S * 1000000;
     if (xSemaphoreTake(s_hello_seen, ticks_until(deadline_us)) != pdTRUE) {
@@ -117,7 +117,8 @@ static esp_err_t find_and_handshake(uint8_t mac[6])
 
     esp_err_t err = ESP_ERR_NOT_FOUND;
     while (esp_timer_get_time() < deadline_us) {
-        db_proto_send_hello(mac, DB_OP_PAIR_HELLO_ACK);  /* the module stays on this channel */
+        /* The module stays on this channel; a lost HELLO_ACK makes this handshake fail and is retried. */
+        ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_send_hello(mac, DB_OP_PAIR_HELLO_ACK));
         err = handshake(mac);
         if (err == ESP_OK) {
             return ESP_OK;

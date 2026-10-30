@@ -3,6 +3,7 @@
 #include "button_gpio.h"
 #include "codes.h"
 #include "db_net.h"
+#include "db_nvs.h"
 #include "db_proto.h"
 #include "db_status_led.h"
 #include "door.h"
@@ -15,7 +16,7 @@
 #include "input.h"
 #include "iot_button.h"
 #include "keypad.h"
-#include "nvs.h"
+#include "nvs.h"  /* ESP_ERR_NVS_NOT_FOUND */
 #include "pairing.h"
 #include "registry.h"
 
@@ -99,18 +100,6 @@ static void ring(uint8_t apartment)
     ESP_LOGI(TAG, "ring apartment %u: %s", apartment, esp_err_to_name(err));
 }
 
-static esp_err_t erase_namespace(const char *ns)
-{
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(ns, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
-    esp_err_t err = nvs_erase_all(nvs);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
-}
-
 static void building_reset(void)
 {
     /* SPEC 6.3: apartment records, counters, channel and application key; codes are kept. */
@@ -118,7 +107,7 @@ static void building_reset(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(registry_erase_all());
     ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_erase_all_counters());
     ESP_ERROR_CHECK_WITHOUT_ABORT(db_net_erase_key());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(erase_namespace(NVS_NAMESPACE));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(db_nvs_erase_namespace(NVS_NAMESPACE));
     esp_restart();  /* boots without a channel and runs the site scan (SPEC 7.5) */
 }
 
@@ -129,7 +118,7 @@ static void on_command(const command_t *command)
         ring(command->apartment);
         break;
     case COMMAND_OPEN_DOOR:
-        door_open();
+        ESP_ERROR_CHECK_WITHOUT_ABORT(door_open());
         break;
     case COMMAND_PAIR:
         show_result(pairing_run(command->apartment));
@@ -152,8 +141,8 @@ static void on_command(const command_t *command)
     }
 }
 
-/* Runs in the db_proto task. */
-static void on_message(const uint8_t src[6], const db_msg_t *msg)
+/* Runs in the db_proto task, after authentication and the replay check. */
+static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool retry)
 {
     uint8_t apartment;
     registry_entry_t entry;
@@ -161,19 +150,11 @@ static void on_message(const uint8_t src[6], const db_msg_t *msg)
             msg->session != entry.session) {
         return;  /* only registered modules, for their own apartment number, in the current session */
     }
-    switch (db_proto_check_counter(src, msg->counter)) {
-    case DB_REPLAY_NEW:
+    if (!retry) {  /* a retry is acknowledged again, the door is not opened twice */
         ESP_LOGI(TAG, "door-open request from apartment %u", apartment);
-        door_open();
-        db_proto_ack(src, DB_OP_OPEN_DOOR_ACK, msg);
-        break;
-    case DB_REPLAY_RETRY:
-        db_proto_ack(src, DB_OP_OPEN_DOOR_ACK, msg);  /* a retry: acknowledge again, do not open twice */
-        break;
-    case DB_REPLAY_OLD:
-        ESP_LOGW(TAG, "old OPEN_DOOR counter %u dropped", (unsigned)msg->counter);
-        break;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(door_open());
     }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_OPEN_DOOR_ACK, msg));
 }
 
 static void app_task(void *arg)
@@ -201,18 +182,13 @@ static void app_task(void *arg)
 /* SPEC 7.5: use the stored channel; without one, run the site scan and store the result. */
 static esp_err_t setup_channel(void)
 {
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
     uint8_t channel = 0;
-    esp_err_t err = nvs_get_u8(nvs, KEY_CHANNEL, &channel);
+    esp_err_t err = db_nvs_get_u8(NVS_NAMESPACE, KEY_CHANNEL, &channel);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = db_net_scan_best_channel(&channel);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "site scan selected channel %u", channel);
-            err = nvs_set_u8(nvs, KEY_CHANNEL, channel);
-            if (err == ESP_OK) {
-                err = nvs_commit(nvs);
-            }
+            err = db_nvs_set_u8(NVS_NAMESPACE, KEY_CHANNEL, channel);
         } else {
             /* Keep working on the first candidate; nothing is stored, so the next boot scans again. */
             uint8_t candidates[DB_CHANNEL_CANDIDATE_COUNT];
@@ -223,7 +199,6 @@ static esp_err_t setup_channel(void)
             err = ESP_OK;
         }
     }
-    nvs_close(nvs);
     ESP_RETURN_ON_ERROR(err, TAG, "channel setup failed");
     return db_net_set_channel(channel);
 }

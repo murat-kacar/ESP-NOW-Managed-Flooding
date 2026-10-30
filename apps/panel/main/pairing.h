@@ -9,7 +9,7 @@
 esp_err_t pairing_init(void);
 
 /** @brief Discovery frames from db_proto (protocol task). */
-void pairing_on_hello(const uint8_t src[6], db_opcode_t opcode);
+void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode);
 
 /**
  * @brief Pair the module next to the panel as an apartment (SPEC 5.1, ADR 0007, ADR 0012). Blocks for up to

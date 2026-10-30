@@ -1,6 +1,7 @@
 #include "db_status_led.h"
 
 #include "esp_check.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "led_indicator.h"
 #include "led_indicator_ledc.h"
@@ -122,25 +123,38 @@ esp_err_t db_status_led_init(int gpio_num)
     return led_indicator_start(s_led, DB_LED_OFF);
 }
 
-esp_err_t db_status_led_start(db_led_pattern_t pattern)
+static bool valid(db_led_pattern_t pattern)
 {
-    ESP_RETURN_ON_FALSE(s_led != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(pattern < DB_LED_PATTERN_COUNT, ESP_ERR_INVALID_ARG, TAG, "invalid pattern");
-    return led_indicator_start(s_led, pattern);
+    if (s_led == NULL || pattern >= DB_LED_PATTERN_COUNT) {
+        ESP_LOGE(TAG, "pattern %d rejected: %s", (int)pattern,
+                 s_led == NULL ? "not initialised" : "invalid pattern");
+        return false;
+    }
+    return true;
 }
 
-esp_err_t db_status_led_stop(db_led_pattern_t pattern)
+void db_status_led_start(db_led_pattern_t pattern)
 {
-    ESP_RETURN_ON_FALSE(s_led != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(pattern < DB_LED_PATTERN_COUNT, ESP_ERR_INVALID_ARG, TAG, "invalid pattern");
-    ESP_RETURN_ON_FALSE(pattern != DB_LED_OFF, ESP_ERR_INVALID_ARG, TAG, "the base pattern stays active");
-    esp_timer_stop(s_stop_timers[pattern]);  /* ESP_ERR_INVALID_STATE if not running is expected */
-    return led_indicator_stop(s_led, pattern);
+    if (valid(pattern)) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(led_indicator_start(s_led, pattern));
+    }
 }
 
-esp_err_t db_status_led_start_for(db_led_pattern_t pattern, uint32_t duration_ms)
+void db_status_led_stop(db_led_pattern_t pattern)
 {
-    ESP_RETURN_ON_ERROR(db_status_led_start(pattern), TAG, "start failed");
-    esp_timer_stop(s_stop_timers[pattern]);  /* restart the duration if already running */
-    return esp_timer_start_once(s_stop_timers[pattern], (uint64_t)duration_ms * 1000U);
+    if (!valid(pattern) || pattern == DB_LED_OFF) {  /* the base pattern stays active */
+        return;
+    }
+    (void)esp_timer_stop(s_stop_timers[pattern]);  /* ESP_ERR_INVALID_STATE when not running is expected */
+    ESP_ERROR_CHECK_WITHOUT_ABORT(led_indicator_stop(s_led, pattern));
+}
+
+void db_status_led_start_for(db_led_pattern_t pattern, uint32_t duration_ms)
+{
+    if (!valid(pattern)) {
+        return;
+    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(led_indicator_start(s_led, pattern));
+    (void)esp_timer_stop(s_stop_timers[pattern]);  /* restart the duration if already running */
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_once(s_stop_timers[pattern], (uint64_t)duration_ms * 1000U));
 }

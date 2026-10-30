@@ -1,3 +1,3 @@
 idf_component_register(SRCS "main.c" "bell.c" "buttons.c" "identity.c" "pairing.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES db_net db_proto db_status_led esp_driver_gpio esp_event esp_timer nvs_flash)
+                       PRIV_REQUIRES db_net db_nvs db_proto db_status_led esp_driver_gpio esp_event esp_timer nvs_flash)

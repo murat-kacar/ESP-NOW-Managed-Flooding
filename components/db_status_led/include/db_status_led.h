@@ -41,14 +41,19 @@ typedef enum {
  */
 esp_err_t db_status_led_init(int gpio_num);
 
-/** @brief Start a pattern; it runs until stopped or until it ends by itself. */
-esp_err_t db_status_led_start(db_led_pattern_t pattern);
+/*
+ * The status LED is a best-effort indicator: a caller cannot act on its failure, so the functions below return
+ * nothing and log every error themselves.
+ */
 
-/** @brief Stop a pattern; the LED falls back to the highest-priority pattern still active. */
-esp_err_t db_status_led_stop(db_led_pattern_t pattern);
+/** @brief Start a pattern; it runs until stopped or until it ends by itself. */
+void db_status_led_start(db_led_pattern_t pattern);
+
+/** @brief Stop a pattern; the LED falls back to the highest-priority pattern still active. DB_LED_OFF stays. */
+void db_status_led_stop(db_led_pattern_t pattern);
 
 /** @brief Start a pattern and stop it after duration_ms. */
-esp_err_t db_status_led_start_for(db_led_pattern_t pattern, uint32_t duration_ms);
+void db_status_led_start_for(db_led_pattern_t pattern, uint32_t duration_ms);
 
 #ifdef __cplusplus
 }

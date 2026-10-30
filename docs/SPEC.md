@@ -185,6 +185,8 @@ typedef struct __attribute__((packed)) {
 } db_msg_t;
 ```
 
+Multi-byte fields are little-endian; the packed structure is sent as is.
+
 Every message is followed by a 16-byte HMAC-SHA256 tag over source MAC, destination MAC and message, with a key
 derived from the application key (32-byte frame). esp-now also delivers unencrypted frames to the application, so
 frames without a valid tag are dropped. HELLO frames carry no tag and are only used to find the channel.

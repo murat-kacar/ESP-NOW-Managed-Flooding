@@ -17,10 +17,10 @@ esp_err_t pairing_init(void);
 esp_err_t pairing_start(void);
 
 /** @brief Discovery frames from db_proto (protocol task). */
-void pairing_on_hello(const uint8_t src[6], db_opcode_t opcode);
+void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode);
 
 /** @brief True if the handshake with this panel succeeded in the open window (PAIR_CONFIG may follow). */
-bool pairing_is_expected_panel(const uint8_t mac[6]);
+bool pairing_is_expected_panel(const uint8_t mac[DB_MAC_LEN]);
 
 /**
  * @brief Close the window. Without success, any stored key is erased: an unpaired module holds no key.

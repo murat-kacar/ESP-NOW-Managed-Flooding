@@ -48,9 +48,6 @@ esp_err_t db_net_ensure_key(void);
 /** @brief Erase the stored application key (module reset, building reset). */
 esp_err_t db_net_erase_key(void);
 
-/** @brief This device's station MAC address. */
-esp_err_t db_net_get_mac(uint8_t mac[6]);
-
 #ifdef __cplusplus
 }
 #endif

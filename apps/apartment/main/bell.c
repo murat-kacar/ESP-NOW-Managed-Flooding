@@ -22,7 +22,7 @@ static atomic_bool s_ringing;
 
 static void pulse_end(void *arg)
 {
-    gpio_set_level(CONFIG_DB_BELL_RELAY_GPIO, BELL_OFF_LEVEL);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_set_level(CONFIG_DB_BELL_RELAY_GPIO, BELL_OFF_LEVEL));
 #if CONFIG_DB_VISUAL_BELL
     db_status_led_stop(DB_LED_RINGING);
 #endif
@@ -54,9 +54,20 @@ esp_err_t bell_ring(void)
     if (!atomic_compare_exchange_strong(&s_ringing, &expected, true)) {
         return ESP_OK;  /* already ringing */
     }
-    ESP_RETURN_ON_ERROR(gpio_set_level(CONFIG_DB_BELL_RELAY_GPIO, BELL_ON_LEVEL), TAG, "set level failed");
+    esp_err_t err = gpio_set_level(CONFIG_DB_BELL_RELAY_GPIO, BELL_ON_LEVEL);
+    if (err != ESP_OK) {
+        atomic_store(&s_ringing, false);
+        ESP_LOGE(TAG, "relay on failed: %s", esp_err_to_name(err));
+        return err;
+    }
 #if CONFIG_DB_VISUAL_BELL
-    db_status_led_start(DB_LED_RINGING);
+    db_status_led_start(DB_LED_RINGING);  /* before the timer, so pulse_end() always runs after it */
 #endif
-    return esp_timer_start_once(s_pulse_timer, (uint64_t)CONFIG_DB_BELL_PULSE_MS * 1000U);
+    err = esp_timer_start_once(s_pulse_timer, (uint64_t)CONFIG_DB_BELL_PULSE_MS * 1000U);
+    if (err != ESP_OK) {
+        pulse_end(NULL);  /* no timer would end the pulse: release the relay now */
+        ESP_LOGE(TAG, "pulse timer failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
 }

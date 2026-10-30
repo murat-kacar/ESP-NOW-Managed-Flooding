@@ -4,8 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "db_nvs.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_wifi.h"
 #include "espnow.h"
 #include "espnow_security.h"
@@ -21,6 +23,7 @@ static const char *TAG = "db_proto";
 #define NS_OWN_COUNTER   "db_ctr_own"   /* this device's send counter reservation */
 #define NS_PEER_COUNTER  "db_ctr_peer"  /* last accepted counter per peer MAC */
 #define KEY_RESERVED     "reserved"
+#define PEER_KEY_SIZE    13             /* 12 hex digits of the MAC and the terminator */
 #define RX_QUEUE_LENGTH  8
 #define TASK_STACK_SIZE  4096
 #define TASK_PRIORITY    5
@@ -41,6 +44,20 @@ typedef struct __attribute__((packed)) {
     uint8_t version;
     uint8_t opcode;
 } hello_frame_t;
+
+/* The wire format (SPEC 7.2) is the in-memory layout: fixed sizes, little-endian fields. */
+_Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the wire format is little-endian");
+_Static_assert(sizeof(db_msg_t) == 16, "db_msg_t is 16 bytes on air");
+_Static_assert(sizeof(auth_frame_t) == 32, "an authenticated frame is 32 bytes on air");
+_Static_assert(sizeof(hello_frame_t) == 2, "a discovery frame is 2 bytes on air");
+_Static_assert(DB_MAC_LEN == ESPNOW_ADDR_LEN, "DB_MAC_LEN must match esp-now");
+
+/* Result of the replay check (ADR 0002). */
+typedef enum {
+    REPLAY_NEW,    /* higher than the last accepted counter; now stored */
+    REPLAY_RETRY,  /* equal to the last accepted counter: a retry */
+    REPLAY_OLD,    /* lower, or the new counter could not be stored: drop */
+} replay_t;
 
 typedef struct {
     uint8_t src[DB_MAC_LEN];
@@ -168,44 +185,14 @@ static bool is_ack(uint8_t opcode)
     return opcode == DB_OP_RING_ACK || opcode == DB_OP_OPEN_DOOR_ACK || opcode == DB_OP_PAIR_CONFIG_ACK;
 }
 
-static void mac_to_key(const uint8_t mac[DB_MAC_LEN], char key[13])
+static bool is_discovery(uint8_t opcode)
 {
-    snprintf(key, 13, "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return opcode == DB_OP_PAIR_HELLO || opcode == DB_OP_PAIR_HELLO_ACK;
 }
 
-static esp_err_t nvs_write_u32(const char *ns, const char *key, uint32_t value)
+static void peer_key(const uint8_t mac[DB_MAC_LEN], char key[PEER_KEY_SIZE])
 {
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(ns, NVS_READWRITE, &nvs), TAG, "nvs_open %s failed", ns);
-    esp_err_t err = nvs_set_u32(nvs, key, value);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
-}
-
-static uint32_t nvs_read_u32(const char *ns, const char *key)
-{
-    nvs_handle_t nvs;
-    uint32_t value = 0;
-    if (nvs_open(ns, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u32(nvs, key, &value);  /* missing key leaves 0 */
-        nvs_close(nvs);
-    }
-    return value;
-}
-
-static esp_err_t nvs_erase_namespace(const char *ns)
-{
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(ns, NVS_READWRITE, &nvs), TAG, "nvs_open %s failed", ns);
-    esp_err_t err = nvs_erase_all(nvs);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
+    snprintf(key, PEER_KEY_SIZE, "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
 /* Block reservation (ADR 0002): NVS is written once per CONFIG_DB_REPLAY_COUNTER_BLOCK messages.
@@ -216,7 +203,7 @@ static esp_err_t next_counter(uint32_t *out)
     esp_err_t err = ESP_OK;
     if (s_counter >= s_reserved) {
         uint32_t reserved = s_counter + CONFIG_DB_REPLAY_COUNTER_BLOCK;
-        err = nvs_write_u32(NS_OWN_COUNTER, KEY_RESERVED, reserved);
+        err = db_nvs_set_u32(NS_OWN_COUNTER, KEY_RESERVED, reserved);
         if (err == ESP_OK) {
             s_reserved = reserved;
         }
@@ -228,7 +215,33 @@ static esp_err_t next_counter(uint32_t *out)
     return err;
 }
 
-/* Sign and send; the frame (message and tag) is identical on every retry. */
+/* Replay check of an authenticated frame (ADR 0002). Runs in the protocol task only. */
+static replay_t check_counter(const uint8_t src[DB_MAC_LEN], uint32_t counter)
+{
+    char key[PEER_KEY_SIZE];
+    peer_key(src, key);
+    uint32_t last = 0;
+    esp_err_t err = db_nvs_get_u32(NS_PEER_COUNTER, key, &last);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "reading the counter of " MACSTR " failed: %s", MAC2STR(src), esp_err_to_name(err));
+        return REPLAY_OLD;
+    }
+    if (counter < last) {
+        return REPLAY_OLD;
+    }
+    if (counter == last) {
+        return REPLAY_RETRY;
+    }
+    err = db_nvs_set_u32(NS_PEER_COUNTER, key, counter);
+    if (err != ESP_OK) {
+        /* Without a stored counter the message could be replayed later, so it is not accepted. */
+        ESP_LOGE(TAG, "storing the counter of " MACSTR " failed: %s", MAC2STR(src), esp_err_to_name(err));
+        return REPLAY_OLD;
+    }
+    return REPLAY_NEW;
+}
+
+/* The frame (message and tag) is identical on every retry. */
 static esp_err_t raw_send(const uint8_t dest[DB_MAC_LEN], const auth_frame_t *frame)
 {
     return espnow_send(ESPNOW_DATA_TYPE_DATA, dest, frame, sizeof(*frame), &s_frame, pdMS_TO_TICKS(SEND_TIMEOUT_MS));
@@ -256,17 +269,45 @@ static void handle_ack(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
                     s_pending.session == msg->session && s_pending.counter == msg->ack_counter &&
                     memcmp(s_pending.dest, src, DB_MAC_LEN) == 0;
     xSemaphoreGive(s_lock);
-    if (expected && db_proto_check_counter(src, msg->counter) == DB_REPLAY_NEW) {
+    if (expected) {
         xSemaphoreGive(s_ack);
     }
 }
 
 static void handle_hello(const uint8_t src[DB_MAC_LEN], const hello_frame_t *hello)
 {
-    if (hello->version == DB_PROTO_VERSION && s_hello_handler &&
-            (hello->opcode == DB_OP_PAIR_HELLO || hello->opcode == DB_OP_PAIR_HELLO_ACK)) {
+    if (hello->version == DB_PROTO_VERSION && s_hello_handler && is_discovery(hello->opcode)) {
         s_hello_handler(src, (db_opcode_t)hello->opcode);
     }
+}
+
+/* Authentication, version and replay checks, then dispatch (ADR 0012). */
+static void handle_message(const uint8_t src[DB_MAC_LEN], const auth_frame_t *frame)
+{
+    const db_msg_t *msg = &frame->msg;
+    if (!verify(src, frame)) {
+        ESP_LOGW(TAG, "message without a valid authentication tag dropped");
+        return;
+    }
+    if (msg->version != DB_PROTO_VERSION) {
+        ESP_LOGW(TAG, "message version %u ignored", msg->version);
+        return;
+    }
+    if (is_discovery(msg->opcode)) {
+        return;  /* discovery opcodes are only valid in plaintext discovery frames */
+    }
+    replay_t replay = check_counter(src, msg->counter);
+    if (replay == REPLAY_OLD) {
+        ESP_LOGW(TAG, "old counter %" PRIu32 " from " MACSTR " dropped", (uint32_t)msg->counter, MAC2STR(src));
+        return;
+    }
+    if (is_ack(msg->opcode)) {
+        if (replay == REPLAY_NEW) {  /* a repeated ACK carries nothing new */
+            handle_ack(src, msg);
+        }
+        return;
+    }
+    s_handler(src, msg, replay == REPLAY_RETRY);
 }
 
 static void protocol_task(void *arg)
@@ -278,21 +319,8 @@ static void protocol_task(void *arg)
         }
         if (item.size == sizeof(hello_frame_t)) {
             handle_hello(item.src, &item.frame.hello);
-            continue;
-        }
-        const db_msg_t *msg = &item.frame.auth.msg;
-        if (!verify(item.src, &item.frame.auth)) {
-            ESP_LOGW(TAG, "message without a valid authentication tag dropped");
-            continue;
-        }
-        if (msg->version != DB_PROTO_VERSION) {
-            ESP_LOGW(TAG, "message version %u ignored", msg->version);
-            continue;
-        }
-        if (is_ack(msg->opcode)) {
-            handle_ack(item.src, msg);
-        } else if (msg->opcode != DB_OP_PAIR_HELLO && msg->opcode != DB_OP_PAIR_HELLO_ACK) {
-            s_handler(item.src, msg);
+        } else {
+            handle_message(item.src, &item.frame.auth);
         }
     }
 }
@@ -303,6 +331,16 @@ esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_hello_handler_t hel
     ESP_RETURN_ON_FALSE(s_rx_queue == NULL, ESP_ERR_INVALID_STATE, TAG, "already initialised");
     ESP_RETURN_ON_FALSE(psa_crypto_init() == PSA_SUCCESS, ESP_FAIL, TAG, "psa_crypto_init failed");
     ESP_RETURN_ON_ERROR(esp_wifi_get_mac(WIFI_IF_STA, s_own_mac), TAG, "reading the MAC failed");
+
+    esp_err_t err = db_nvs_get_u32(NS_OWN_COUNTER, KEY_RESERVED, &s_reserved);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        s_reserved = 0;  /* never sent: start at 1 */
+    } else {
+        ESP_RETURN_ON_ERROR(err, TAG, "reading the send counter failed");
+    }
+    s_counter = s_reserved;
+    ESP_LOGI(TAG, "send counter resumes at %" PRIu32, s_counter + 1);
+
     s_handler = handler;
     s_hello_handler = hello_handler;
     s_lock = xSemaphoreCreateMutex();
@@ -310,11 +348,6 @@ esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_hello_handler_t hel
     s_ack = xSemaphoreCreateBinary();
     s_rx_queue = xQueueCreate(RX_QUEUE_LENGTH, sizeof(rx_item_t));
     ESP_RETURN_ON_FALSE(s_lock && s_request_lock && s_ack && s_rx_queue, ESP_ERR_NO_MEM, TAG, "no memory");
-
-    s_reserved = nvs_read_u32(NS_OWN_COUNTER, KEY_RESERVED);
-    s_counter = s_reserved;
-    ESP_LOGI(TAG, "send counter resumes at %" PRIu32, s_counter + 1);
-
     ESP_RETURN_ON_FALSE(xTaskCreate(protocol_task, "db_proto", TASK_STACK_SIZE, NULL, TASK_PRIORITY, NULL) == pdPASS,
                         ESP_ERR_NO_MEM, TAG, "task create failed");
     return espnow_set_config_for_data_type(ESPNOW_DATA_TYPE_DATA, true, on_espnow_data);
@@ -333,8 +366,7 @@ esp_err_t db_proto_send(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg)
 
 esp_err_t db_proto_send_hello(const uint8_t dest[DB_MAC_LEN], db_opcode_t opcode)
 {
-    ESP_RETURN_ON_FALSE(opcode == DB_OP_PAIR_HELLO || opcode == DB_OP_PAIR_HELLO_ACK, ESP_ERR_INVALID_ARG, TAG,
-                        "not a discovery opcode");
+    ESP_RETURN_ON_FALSE(is_discovery(opcode), ESP_ERR_INVALID_ARG, TAG, "not a discovery opcode");
     const hello_frame_t hello = { .version = DB_PROTO_VERSION, .opcode = opcode };
     return espnow_send(ESPNOW_DATA_TYPE_DATA, dest, &hello, sizeof(hello), &s_hello_frame,
                        pdMS_TO_TICKS(SEND_TIMEOUT_MS));
@@ -391,52 +423,22 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
     return err;
 }
 
-db_replay_t db_proto_check_counter(const uint8_t src[DB_MAC_LEN], uint32_t counter)
-{
-    char key[13];
-    mac_to_key(src, key);
-    uint32_t last = nvs_read_u32(NS_PEER_COUNTER, key);
-    if (counter < last) {
-        return DB_REPLAY_OLD;
-    }
-    if (counter == last) {
-        return DB_REPLAY_RETRY;
-    }
-    esp_err_t err = nvs_write_u32(NS_PEER_COUNTER, key, counter);
-    if (err != ESP_OK) {
-        /* Without a stored counter the message could be replayed later, so it is not accepted. */
-        ESP_LOGE(TAG, "storing counter failed: %s", esp_err_to_name(err));
-        return DB_REPLAY_OLD;
-    }
-    return DB_REPLAY_NEW;
-}
-
 esp_err_t db_proto_forget_peer(const uint8_t mac[DB_MAC_LEN])
 {
-    char key[13];
-    mac_to_key(mac, key);
-    nvs_handle_t nvs;
-    ESP_RETURN_ON_ERROR(nvs_open(NS_PEER_COUNTER, NVS_READWRITE, &nvs), TAG, "nvs_open failed");
-    esp_err_t err = nvs_erase_key(nvs, key);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        err = ESP_OK;
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
+    char key[PEER_KEY_SIZE];
+    peer_key(mac, key);
+    return db_nvs_erase_key(NS_PEER_COUNTER, key);
 }
 
 esp_err_t db_proto_erase_peer_counters(void)
 {
-    return nvs_erase_namespace(NS_PEER_COUNTER);
+    return db_nvs_erase_namespace(NS_PEER_COUNTER);
 }
 
 esp_err_t db_proto_erase_all_counters(void)
 {
-    ESP_RETURN_ON_ERROR(nvs_erase_namespace(NS_PEER_COUNTER), TAG, "erase peer counters failed");
-    ESP_RETURN_ON_ERROR(nvs_erase_namespace(NS_OWN_COUNTER), TAG, "erase own counter failed");
+    ESP_RETURN_ON_ERROR(db_nvs_erase_namespace(NS_PEER_COUNTER), TAG, "erase peer counters failed");
+    ESP_RETURN_ON_ERROR(db_nvs_erase_namespace(NS_OWN_COUNTER), TAG, "erase own counter failed");
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_counter = 0;
     s_reserved = 0;
