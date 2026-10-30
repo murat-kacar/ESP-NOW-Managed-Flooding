@@ -1,0 +1,4 @@
+dependencies:
+  idf: ">=6.1"
+  espressif/button: "^4.2.3"
+  espressif/esp-now: "^2.5.3"

@@ -1,7 +1,7 @@
 # ESP32 Smart Apartment Doorbell and Access Control System — Specification
 
 Version: 2026-10-29
-Sources: original project specification + `docs/adr/0001`–`0011`
+Sources: original project specification + `docs/adr/0001`–`0012`
 
 > Every decision in this document links to its ADR. Values not yet verified by measurement or test are marked **[TO VERIFY]** and listed in section 9.
 
@@ -105,7 +105,8 @@ Input is also cleared automatically after 10 s of inactivity.
 
 ### 4.1. Wrong-code protection
 - After 5 wrong codes in a row, input starting with `*` is locked for 60 s.
-- If errors continue, the lockout doubles (120, 240 s, …) up to 15 min.
+- If errors continue, the lockout doubles (120, 240 s, …) up to 15 min. After each lockout the failure count restarts;
+  a correct code resets the lockout level (ADR 0012).
 - Ringing is never blocked during a lockout.
 
 ---
@@ -163,21 +164,26 @@ Carried inside the encrypted payload:
 
 ```c
 typedef enum {
-    DB_OP_RING          = 1,  // Panel -> Apartment
-    DB_OP_RING_ACK      = 2,  // Apartment -> Panel
-    DB_OP_OPEN_DOOR     = 3,  // Apartment -> Panel
-    DB_OP_OPEN_DOOR_ACK = 4,  // Panel -> Apartment
+    DB_OP_RING            = 1,  // Panel -> Apartment
+    DB_OP_RING_ACK        = 2,  // Apartment -> Panel
+    DB_OP_OPEN_DOOR       = 3,  // Apartment -> Panel
+    DB_OP_OPEN_DOOR_ACK   = 4,  // Panel -> Apartment
+    DB_OP_PAIR_CONFIG     = 5,  // Panel -> Apartment, after the espnow_sec handshake
+    DB_OP_PAIR_CONFIG_ACK = 6,  // Apartment -> Panel
 } db_opcode_t;
 
 typedef struct __attribute__((packed)) {
-    uint8_t  version;    // Message format version
-    uint8_t  opcode;     // db_opcode_t
-    uint8_t  apartment;  // Target or source apartment (1-99)
-    uint32_t counter;    // Replay counter (ADR 0002)
+    uint8_t  version;      // Message format version (1)
+    uint8_t  opcode;       // db_opcode_t
+    uint8_t  apartment;    // Target or source apartment
+    uint8_t  channel;      // PAIR_CONFIG: Wi-Fi channel; otherwise 0
+    uint32_t counter;      // Sender's replay counter (ADR 0002)
+    uint32_t ack_counter;  // ACKs: counter of the acknowledged request
 } db_msg_t;
 ```
 
-Pairing messages are replaced by the espnow_sec handshake and have no opcodes of their own. The format of the configuration message sent after the handshake (apartment number, channel) will be defined during implementation.
+The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apartment number and channel
+(`components/db_proto`, [ADR 0012](adr/0012-protocol-and-application-logic.md)).
 
 ### 7.3. Replay protection ([ADR 0002](adr/0002-replay-protection-counter.md))
 - Every sender increments its counter by 1 for each message.
@@ -197,8 +203,8 @@ Pairing messages are replaced by the espnow_sec handshake and have no opcodes of
 - The channel cannot be changed after installation; if it must change, all apartments are paired again.
 
 ### 7.6. RF power
-- Lab: 10 dBm (`esp_wifi_set_max_tx_power(40)`)
-- Field: 20 dBm (`esp_wifi_set_max_tx_power(80)`)
+- Lab: 10 dBm (`esp_wifi_set_max_tx_power(40)`); ESP-IDF maps 40 to 34, i.e. 8.5 dBm actual.
+- Field: 20 dBm (`esp_wifi_set_max_tx_power(80)`).
 
 ---
 
@@ -228,10 +234,10 @@ Pairing messages are replaced by the espnow_sec handshake and have no opcodes of
 | # | Item | Method |
 |---|---|---|
 | 1 | espnow_sec handshake is single-hop | Bench test |
-| 2 | Whether the espnow_sec PoP parameter accepts NULL | Source code / bench |
-| 3 | Dwell time per channel during channel hopping | Bench test |
-| 4 | Whether packets encrypted with a different key are forwarded | Bench test |
-| 5 | How the espnow_sec application key is generated | Source code |
+| 2 | ~~Whether the espnow_sec PoP parameter accepts NULL~~ — No (`ESP_PARAM_CHECK`); fixed non-secret PoP used (ADR 0012) | Source code ✔ |
+| 3 | Dwell time per channel during channel hopping (3000 ms > one 2.5 s scan) | Bench test |
+| 4 | Whether packets encrypted with a different key are forwarded — Yes per source code (forwarded before decryption) | Bench test |
+| 5 | ~~How the espnow_sec application key is generated~~ — `esp_fill_random()` on the panel, as in the esp-now security example | Source code ✔ |
 | 6 | End-to-end latency and ACK timeout | Field measurement |
 | 7 | `forward_ttl` and `forward_rssi` values | Field measurement |
 | 8 | Signal penetration between floors, delivery when an intermediate node is lost | Field measurement |
@@ -241,7 +247,7 @@ Pairing messages are replaced by the espnow_sec handshake and have no opcodes of
 
 ## 10. To Define
 
-- Format of the post-pairing configuration message (implementation phase).
+- ~~Format of the post-pairing configuration message~~ — `DB_OP_PAIR_CONFIG` (section 7.2).
 - Production flashing flow (production phase).
 
 ---

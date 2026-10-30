@@ -74,6 +74,6 @@ direct_dependencies:
 - espressif/esp-now
 - espressif/led_indicator
 - idf
-manifest_hash: 6dce71d4fa1180efc4ea7212e0ce28182c8d926e33b1e2049cbb269c0b151a14
+manifest_hash: 1cea92f851feebabc521f80b0d4db9920f9c281c4d4684963eebd3659b7aec31
 target: esp32
 version: 3.0.0

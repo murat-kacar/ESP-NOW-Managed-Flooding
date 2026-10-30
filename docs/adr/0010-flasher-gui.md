@@ -35,7 +35,7 @@ Project Kconfig files: `components/db_net/Kconfig` (network, channels, regulator
 
 Defaults without an official or SPEC source are proposals and say so in their help text:
 forward TTL 10 and forward RSSI -55 dBm (esp-now `ESPNOW_CONTROL_*`), retransmit count 10 (esp-now `ESPNOW_FRAME_CONFIG_DEFAULT`),
-ACK timeout 400 ms (original specification), channel dwell 3000 ms (longer than one `espnow_sec_initiator_scan` cycle),
+ACK timeout 400 ms (original specification), channel dwell 3000 ms (more than the panel's 1 s scan plus handshake time, ADR 0012),
 LED PWM 4 kHz (ESP-IDF `ledc_basic` example), Long Range off (ESP-IDF `espnow` example);
 unverified proposals: LED dim 10 %, LED pattern timings except 1 Hz / 1 s / 2 s / 3 s, buzzer 2700 Hz, keypad debounce 20 ms and scan 10 ms,
 replay counter block 100.

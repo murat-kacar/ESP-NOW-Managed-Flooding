@@ -34,5 +34,4 @@ Sources: the downloaded component sources in `managed_components/`.
 - Pairing and reset buttons: release window LED from `DB_SERVICE_HOLD_MIN_S` to `DB_SERVICE_HOLD_MAX_S`,
   cancel pattern from `DB_SERVICE_HOLD_CANCEL_S`; only a release inside the window triggers the action.
   SPEC does not define the indication between the window end and the cancel time; the LED shows the base state there.
-- Not implemented yet: the network actions (OPEN_DOOR message, pairing protocol, identity storage) and the
-  trigger for the bell (RING message). Until then the actions log and show local LED feedback.
+- The network actions (OPEN_DOOR, RING, pairing, identity storage) are described in ADR 0012.

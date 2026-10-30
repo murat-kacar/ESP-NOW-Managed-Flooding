@@ -1,3 +1,3 @@
 idf_component_register(SRCS "db_net.c"
                        INCLUDE_DIRS "include"
-                       PRIV_REQUIRES esp_wifi esp_netif esp_event)
+                       PRIV_REQUIRES esp_wifi esp_netif esp_event esp_hw_support nvs_flash)

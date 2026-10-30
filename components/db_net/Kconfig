@@ -8,6 +8,8 @@ menu "Doorbell network"
 
         config DB_TX_POWER_10DBM
             bool "10 dBm (lab bench)"
+            help
+                Sets 40 (0.25 dBm units, SPEC 7.6); ESP-IDF maps it to 34 = 8.5 dBm (esp_wifi_set_max_tx_power).
         config DB_TX_POWER_20DBM
             bool "20 dBm (field)"
     endchoice
@@ -69,6 +71,15 @@ menu "Doorbell network"
 
     menu "Wi-Fi channel"
         comment "Candidate channels for the installation site scan (ADR 0006)."
+
+        config DB_CHANNEL_DWELL_MS
+            int "Pairing channel dwell time (ms)"
+            range 2500 10000
+            default 3000
+            help
+                Time the unpaired module listens on each candidate channel (ADR 0007). The panel scans in 1 s
+                steps, so the dwell must exceed 2 s to leave time for the handshake. No official default exists.
+                Not verified by bench test yet (SPEC 9).
 
         config DB_CHANNEL_CANDIDATE_1
             int "Candidate channel 1"

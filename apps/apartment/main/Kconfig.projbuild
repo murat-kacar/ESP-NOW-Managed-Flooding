@@ -82,15 +82,6 @@ menu "Doorbell apartment module"
                 Must be greater than the maximum hold.
     endmenu
 
-    config DB_CHANNEL_DWELL_MS
-        int "Pairing channel dwell time (ms)"
-        range 500 10000
-        default 3000
-        help
-            Time the unpaired module listens on each candidate channel (ADR 0007).
-            No official default exists; 3000 ms exceeds one espnow_sec_initiator_scan cycle
-            (about 5 requests 500 ms apart). Not verified by bench test yet (SPEC 9).
-
     config DB_OPEN_DOOR_RETRIES
         int "OPEN_DOOR retries without ACK"
         range 0 10
