@@ -28,6 +28,16 @@ static const char *TAG = "db_status_led";
 #define SPARSE_INTERVAL  CONFIG_DB_LED_SPARSE_FLASH_INTERVAL_MS
 #define HOLD_MS          1000  /* step length of solid patterns; they loop until stopped */
 
+/* led_indicator runs each step on a FreeRTOS timer with pdMS_TO_TICKS(hold_time_ms); a step shorter than one tick
+ * becomes a 0-tick period, which FreeRTOS rejects with an assert. A hold time of 0 means "apply and continue". */
+#define TICK_MS (1000 / CONFIG_FREERTOS_HZ)
+#define AT_LEAST_ONE_TICK(ms) ((ms) >= TICK_MS)
+_Static_assert(AT_LEAST_ONE_TICK(SHORT_FLASH) && AT_LEAST_ONE_TICK(PULSE_ON) && AT_LEAST_ONE_TICK(PULSE_GAP) &&
+               AT_LEAST_ONE_TICK(FAST_HALF) && AT_LEAST_ONE_TICK(MEDIUM_HALF) && AT_LEAST_ONE_TICK(SLOW_HALF) &&
+               AT_LEAST_ONE_TICK(PULSE_CYCLE - 3 * PULSE_ON - 2 * PULSE_GAP) &&
+               AT_LEAST_ONE_TICK(SPARSE_INTERVAL - SHORT_FLASH) && AT_LEAST_ONE_TICK(PULSE_CYCLE - SHORT_FLASH),
+               "every LED pattern step must last at least one FreeRTOS tick");
+
 /* Reject timing combinations that cannot form the pattern, at build time. */
 _Static_assert(PULSE_CYCLE > 3 * PULSE_ON + 2 * PULSE_GAP,
                "DB_LED_PULSE_CYCLE_MS must exceed three pulses and two gaps");
@@ -38,8 +48,8 @@ static const blink_step_t s_fast_blink[] = { ON(FAST_HALF), OFF(FAST_HALF), LOOP
 static const blink_step_t s_medium_blink[] = { ON(MEDIUM_HALF), OFF(MEDIUM_HALF), LOOP };
 static const blink_step_t s_slow_blink[] = { ON(SLOW_HALF), OFF(SLOW_HALF), LOOP };
 static const blink_step_t s_solid[] = { ON(HOLD_MS), LOOP };
-static const blink_step_t s_success[] = { ON(CONFIG_DB_LED_SUCCESS_MS), OFF(1), STOP };
-static const blink_step_t s_key_press[] = { ON(SHORT_FLASH), OFF(1), STOP };
+static const blink_step_t s_success[] = { ON(CONFIG_DB_LED_SUCCESS_MS), OFF(0), STOP };
+static const blink_step_t s_key_press[] = { ON(SHORT_FLASH), OFF(0), STOP };
 static const blink_step_t s_double_flash[] = {
     ON(PULSE_ON), OFF(PULSE_GAP), ON(PULSE_ON), OFF(PULSE_CYCLE - 2 * PULSE_ON - PULSE_GAP), LOOP,
 };
