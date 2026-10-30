@@ -38,9 +38,11 @@ Project Kconfig files: `components/db_net/Kconfig` (network, channels, regulator
 Defaults without an official or SPEC source are proposals and say so in their help text:
 forward TTL 10 and forward RSSI -55 dBm (esp-now `ESPNOW_CONTROL_*`), retransmit count 10 (esp-now `ESPNOW_FRAME_CONFIG_DEFAULT`),
 ACK timeout 400 ms (original specification), channel dwell 500 ms (wait for the panel's HELLO_ACK, ADR 0012),
-LED PWM 4 kHz (ESP-IDF `ledc_basic` example), Long Range off (ESP-IDF `espnow` example);
-unverified proposals: LED dim 10 %, LED pattern timings except 1 Hz / 1 s / 2 s / 3 s, buzzer 2700 Hz, keypad debounce 20 ms and scan 10 ms,
+Long Range off (ESP-IDF `espnow` example);
+unverified proposals: LED dim 10 %, LED pattern timings except 1 Hz / 1 s / 2 s / 3 s, buzzer 2700 Hz,
 replay counter block 100.
+Component defaults kept as is: LED PWM 5 kHz with 13-bit resolution (espressif/led_indicator), button and keypad
+scan every 5 ms with a 2-scan debounce (espressif/button).
 
 Code lengths: the device rows use the admin and user code lengths currently set in the configuration form.
 The image does not carry its configuration, so the form must match the firmware being flashed.
