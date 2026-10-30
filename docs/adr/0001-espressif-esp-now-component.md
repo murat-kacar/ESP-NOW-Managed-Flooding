@@ -13,7 +13,7 @@ Communication is built on `espressif/esp-now`. Features used:
 - Duplicate filter: `magic` (random, 32-entry cache)
 - Reliability: `ack`, `retransmit_count`
 - Security: espnow_sec (ECDH + PoP key exchange, AES128-CCM, random IV per packet)
-- OTA: the component's OTA module
+- ~~OTA: the component's OTA module~~: not used, the system is closed (ADR 0013)
 
 ## Consequences
 - The custom flooding code, CRC-16, jitter and the `seq` field are removed.

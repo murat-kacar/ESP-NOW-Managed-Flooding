@@ -1,7 +1,7 @@
 # ESP32 Smart Apartment Doorbell and Access Control System — Specification
 
 Version: 2026-10-29
-Sources: original project specification + `docs/adr/0001`–`0012`
+Sources: original project specification + `docs/adr/0001`–`0014`
 
 > Every decision in this document links to its ADR. Values not yet verified by measurement or test are marked **[TO VERIFY]** and listed in section 9.
 
@@ -231,9 +231,12 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
 - No eFuse is burned during development; every change is reversible.
 - The merged image is produced by `tools/build.py`: for each role it runs `idf.py build` and `idf.py merge-bin` (raw format).
   In raw format esptool pads the gaps between files with `0xFF` (esptool 5.6.0 source code), so flashing at `0x0` also erases the NVS region.
-- OTA: the `espressif/esp-now` OTA module. Signed images in production.
-- Partition table: OTA partitions, factory NVS partition (`mfg_gen.py`), `nvs_keys` in production.
-  Current panel table: ESP-IDF single-app layout plus `fctry` (0x110000, 0x6000, readonly).
+- No OTA: the system is closed and never communicates outside its ESP-NOW network; firmware is changed only by
+  serial flashing on site ([ADR 0013](adr/0013-closed-system-no-ota.md)).
+- Partition table: ESP-IDF single-app layout plus the factory NVS partition (`mfg_gen.py`), `nvs_keys` in production;
+  no OTA partitions. Current panel table: single-app layout plus `fctry` (0x110000, 0x6000, readonly).
+- Accepted risks: no PoP ([ADR 0007](adr/0007-pairing-near-panel.md)); shared application key, lockout in RAM, panel
+  busy while pairing, flasher code lengths ([ADR 0014](adr/0014-accepted-risks.md)).
 - Build and flashing GUI: `python -m tools.flasher` ([ADR 0010](adr/0010-flasher-gui.md)). Per-device factory NVS is generated at flash time; there is no per-device firmware build.
 
 ---

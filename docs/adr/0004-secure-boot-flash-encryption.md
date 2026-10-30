@@ -27,5 +27,6 @@ Two configuration profiles are used (via ESP-IDF `SDKCONFIG_DEFAULTS`):
 - No eFuse is burned on development boards; all changes stay reversible.
 - The production profile is validated on dedicated test boards before any eFuse is burned.
 - Production can only use ESP32 revision v3.0 or later.
-- OTA images must be signed in production; the signing key is kept in a secure environment.
+- Secure Boot v2 accepts only signed images, so every production image is signed; the signing key is kept in a
+  secure environment. There is no OTA (ADR 0013).
 - Flashing a merged image at 0x0 (SPEC section 8) applies to the development profile only; the production flashing flow will be defined separately.
