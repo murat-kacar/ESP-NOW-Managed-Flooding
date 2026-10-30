@@ -247,14 +247,14 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
 |---|---|---|
 | 1 | espnow_sec handshake is single-hop | Bench test |
 | 2 | ~~Whether the espnow_sec PoP parameter accepts NULL~~ — No (`ESP_PARAM_CHECK`); fixed non-secret PoP used (ADR 0012) | Source code (done) |
-| 3 | Dwell time per channel while the module waits for HELLO_ACK (proposed 500 ms) | Bench test |
+| 3 | Dwell time per channel while the module waits for HELLO_ACK (proposed 500 ms) | Bench test: 10 pairings, panel on each candidate channel |
 | 4 | Whether packets encrypted with a different key are forwarded — Yes per source code (forwarded before decryption) | Bench test |
 | 5 | ~~How the espnow_sec application key is generated~~ — `esp_fill_random()` on the panel, as in the esp-now security example | Source code (done) |
-| 6 | End-to-end latency and ACK timeout | Field measurement |
-| 7 | `forward_ttl` and `forward_rssi` values | Field measurement |
+| 6 | End-to-end latency and ACK timeout | Field measurement: `db_proto` logs each request's time to ACK, counted from the first send |
+| 7 | `forward_ttl` and `forward_rssi` values | Field measurement: `db_proto` logs the RSSI of every authentic frame (last hop) |
 | 8 | Signal penetration between floors, delivery when an intermediate node is lost | Field measurement |
-| 9 | Door relay does not engage on power-up / reset / flashing | Measurement |
-| 10 | Voltage drop on the 3.3 V rail while the relay engages | Measurement |
+| 9 | Door relay does not engage on power-up / reset / flashing | Measurement: oscilloscope on GPIO 23, single trigger on a falling edge |
+| 10 | Voltage drop on the 3.3 V rail while the relay engages | Measurement: oscilloscope on 3V3; no brownout reset in the log |
 | 11 | Replay counter block size | Usage data |
 
 ## 10. To Define

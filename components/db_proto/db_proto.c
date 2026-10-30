@@ -8,6 +8,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "espnow.h"
 #include "espnow_security.h"
@@ -61,6 +62,7 @@ typedef enum {
 
 typedef struct {
     uint8_t src[DB_MAC_LEN];
+    int8_t rssi;  /* of the received copy, i.e. of the last hop when the frame was forwarded */
     size_t size;
     union {
         auth_frame_t auth;
@@ -253,7 +255,7 @@ static esp_err_t on_espnow_data(uint8_t *src_addr, void *data, size_t size, wifi
     if (size != sizeof(auth_frame_t) && size != sizeof(hello_frame_t)) {
         return ESP_OK;
     }
-    rx_item_t item = { .size = size };
+    rx_item_t item = { .size = size, .rssi = (int8_t)rx_ctrl->rssi };
     memcpy(item.src, src_addr, DB_MAC_LEN);
     memcpy(&item.frame, data, size);
     if (xQueueSend(s_rx_queue, &item, 0) != pdTRUE) {
@@ -274,21 +276,25 @@ static void handle_ack(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
     }
 }
 
-static void handle_hello(const uint8_t src[DB_MAC_LEN], const hello_frame_t *hello)
+static void handle_hello(const uint8_t src[DB_MAC_LEN], int rssi, const hello_frame_t *hello)
 {
     if (hello->version == DB_PROTO_VERSION && s_hello_handler && is_discovery(hello->opcode)) {
+        ESP_LOGI(TAG, "discovery opcode %u from " MACSTR ", RSSI %d dBm", hello->opcode, MAC2STR(src), rssi);
         s_hello_handler(src, (db_opcode_t)hello->opcode);
     }
 }
 
 /* Authentication, version and replay checks, then dispatch (ADR 0012). */
-static void handle_message(const uint8_t src[DB_MAC_LEN], const auth_frame_t *frame)
+static void handle_message(const uint8_t src[DB_MAC_LEN], int rssi, const auth_frame_t *frame)
 {
     const db_msg_t *msg = &frame->msg;
     if (!verify(src, frame)) {
         ESP_LOGW(TAG, "message without a valid authentication tag dropped");
         return;
     }
+    /* Link measurement (SPEC 9): logged only for authentic frames, so foreign traffic adds no lines. */
+    ESP_LOGI(TAG, "opcode %u from " MACSTR ", counter %" PRIu32 ", RSSI %d dBm (last hop)", msg->opcode, MAC2STR(src),
+             (uint32_t)msg->counter, rssi);
     if (msg->version != DB_PROTO_VERSION) {
         ESP_LOGW(TAG, "message version %u ignored", msg->version);
         return;
@@ -318,9 +324,9 @@ static void protocol_task(void *arg)
             continue;
         }
         if (item.size == sizeof(hello_frame_t)) {
-            handle_hello(item.src, &item.frame.hello);
+            handle_hello(item.src, item.rssi, &item.frame.hello);
         } else {
-            handle_message(item.src, &item.frame.auth);
+            handle_message(item.src, item.rssi, &item.frame.auth);
         }
     }
 }
@@ -405,7 +411,9 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
         xSemaphoreTake(s_ack, 0);  /* drop a stale signal */
 
         err = ESP_ERR_TIMEOUT;
-        for (int attempt = 0; attempt <= retries && err != ESP_OK; attempt++) {
+        const int64_t start_us = esp_timer_get_time();
+        int attempt = 0;
+        for (; attempt <= retries && err != ESP_OK; attempt++) {
             esp_err_t sent = raw_send(dest, &frame);  /* same counter and tag on every attempt */
             if (sent != ESP_OK) {
                 ESP_LOGW(TAG, "send failed: %s", esp_err_to_name(sent));
@@ -413,6 +421,16 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
             if (xSemaphoreTake(s_ack, pdMS_TO_TICKS(CONFIG_DB_ACK_TIMEOUT_MS)) == pdTRUE) {
                 err = ESP_OK;
             }
+        }
+        /* ACK timeout measurement (SPEC 9). Retries carry the same counter, so a late ACK of the first attempt also
+         * ends the wait: the time is counted from the first send. */
+        const int elapsed_ms = (int)((esp_timer_get_time() - start_us) / 1000);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "opcode %u to " MACSTR " acknowledged after %d ms (attempt %d of %d)", msg->opcode,
+                     MAC2STR(dest), elapsed_ms, attempt, retries + 1);
+        } else {
+            ESP_LOGW(TAG, "opcode %u to " MACSTR " not acknowledged after %d ms (%d attempts)", msg->opcode,
+                     MAC2STR(dest), elapsed_ms, retries + 1);
         }
 
         xSemaphoreTake(s_lock, portMAX_DELAY);
