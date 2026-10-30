@@ -22,6 +22,9 @@ from esp_kconfiglib import core as kc
 from .config import REPO_ROOT, idf_path
 from .widgets import ScrollableFrame, Tooltip
 
+LABEL_WRAP = 180  # px; long option names wrap instead of widening the form
+CHOICE_WIDTH = 18  # characters; longer choices are still readable in the drop-down list
+
 PROJECT_MENU_PREFIX = "Doorbell"
 COMPONENT_MENUS = ("ESP-NOW Configuration",)
 IDF_SELECTED = (
@@ -284,7 +287,9 @@ class ConfigForm(ttk.Frame):
     def _choice_field(self, node, choice: kc.Choice, depth: int) -> None:
         options = {sym.nodes[0].prompt[0]: sym for sym in choice.syms if sym.visibility}
         var = tk.StringVar(value=choice.selection.nodes[0].prompt[0] if choice.selection else "")
-        box = ttk.Combobox(self._scroll.inner, textvariable=var, values=list(options), state="readonly", width=24)
+        box = ttk.Combobox(
+            self._scroll.inner, textvariable=var, values=list(options), state="readonly", width=CHOICE_WIDTH,
+        )
 
         def on_select(_: tk.Event) -> None:
             options[var.get()].set_value(2)
@@ -295,10 +300,10 @@ class ConfigForm(ttk.Frame):
         default = self._defaults.get(choice.name)
         default_prompt = self._kconfig.syms[default].nodes[0].prompt[0] if default else ""
         help_text = f"Default: {default_prompt}.\n{node.help or ''}" if default_prompt else (node.help or "")
-        self._place(ttk.Label(self._scroll.inner, text=node.prompt[0], wraplength=210), box, depth, help_text.strip())
+        self._place(ttk.Label(self._scroll.inner, text=node.prompt[0], wraplength=LABEL_WRAP), box, depth, help_text.strip())
 
     def _symbol_field(self, node, sym: kc.Symbol, depth: int) -> None:
-        label = ttk.Label(self._scroll.inner, text=node.prompt[0], wraplength=210)
+        label = ttk.Label(self._scroll.inner, text=node.prompt[0], wraplength=LABEL_WRAP)
         default = self._defaults.get(sym.name, sym.str_value)
         if sym.type == kc.BOOL:
             var = tk.BooleanVar(value=sym.str_value == "y")
