@@ -1,4 +1,5 @@
-# ESP-IDF build outputs
+# ESP-IDF build outputs (sdkconfig is generated from sdkconfig.defaults on every build; dependencies.lock is
+# committed, as Espressif recommends)
 build/
 sdkconfig
 sdkconfig.old
@@ -10,5 +11,23 @@ builds/
 # Device records with plain-text codes (tools/flasher/records.py)
 records/
 
-# Python
+# Python (GitHub Python.gitignore, the parts that apply)
 __pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors and local tool settings
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# Operating system files (GitHub Windows.gitignore and macOS.gitignore)
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+.DS_Store
