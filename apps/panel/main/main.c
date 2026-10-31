@@ -150,15 +150,20 @@ static void on_command(const command_t *command)
     }
 }
 
-/* Runs in the db_proto task, after authentication and the replay check. */
-static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const uint8_t *body, size_t body_len,
-                       bool retry)
+/* Runs in the db_proto task before the replay check: only a registered module, for its own apartment number, in its
+ * current session, may change replay state (ADR 0012). */
+static bool accept_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
 {
     uint8_t apartment;
     registry_entry_t entry;
-    if (!registry_find(src, &apartment, &entry) || apartment != msg->apartment || msg->session != entry.session) {
-        return;  /* only registered modules, for their own apartment number, in the current session */
-    }
+    return registry_find(src, &apartment, &entry) && apartment == msg->apartment && msg->session == entry.session;
+}
+
+/* Runs in the db_proto task, after accept_message() and the replay check. */
+static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const uint8_t *body, size_t body_len,
+                       bool retry)
+{
+    const uint8_t apartment = msg->apartment;  /* accept_message() matched it to the sender's record */
     switch (msg->opcode) {
     case DB_OP_OPEN_DOOR:
         if (!retry) {  /* a retry is acknowledged again, the door is not opened twice */
@@ -168,11 +173,8 @@ static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const
         ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_OPEN_DOOR_ACK, msg));
         break;
     case DB_OP_HEARTBEAT: {
-        db_health_t report;  /* copied: the body has no alignment guarantee */
-        if (body_len != sizeof(report)) {
-            ESP_LOGW(TAG, "apartment %u: report of %u bytes ignored", apartment, (unsigned)body_len);
-            break;
-        }
+        db_health_t report;  /* copied: the body has no alignment guarantee; db_proto checked its length */
+        (void)body_len;
         memcpy(&report, body, sizeof(report));
         health_on_report(apartment, &report);
         break;
@@ -255,7 +257,7 @@ void app_main(void)
     ESP_ERROR_CHECK(health_init());
     ESP_ERROR_CHECK(setup_channel());
     ESP_ERROR_CHECK(pairing_init());
-    ESP_ERROR_CHECK(db_proto_init(on_message, pairing_on_hello));
+    ESP_ERROR_CHECK(db_proto_init(on_message, accept_message, pairing_on_hello));
     ESP_ERROR_CHECK(input_init(on_command, on_input_timeout));
     ESP_ERROR_CHECK(xTaskCreate(app_task, "panel", APP_TASK_STACK, NULL, APP_TASK_PRIO, NULL) == pdPASS
                     ? ESP_OK : ESP_ERR_NO_MEM);

@@ -51,19 +51,30 @@ static bool get_identity(identity_t *out)
     return paired;
 }
 
+/* Runs in the db_proto task before the replay check: only the paired panel in the current session, or the panel of
+ * the open pairing window for PAIR_CONFIG, may change replay state (ADR 0012). */
+static bool accept_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
+{
+    identity_t identity;
+    if (get_identity(&identity)) {
+        return memcmp(src, identity.panel_mac, DB_MAC_LEN) == 0 && msg->apartment == identity.apartment &&
+               msg->session == identity.session;
+    }
+    return msg->opcode == DB_OP_PAIR_CONFIG && pairing_is_expected_panel(src);
+}
+
 static void handle_pair_config(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool retry)
 {
     identity_t current;
     if (get_identity(&current)) {
-        /* The panel did not get our ACK and retried with the same counter: acknowledge again. */
-        if (retry && memcmp(src, current.panel_mac, DB_MAC_LEN) == 0 && msg->apartment == current.apartment &&
-                msg->session == current.session) {
+        if (retry) {
+            /* The panel did not get our ACK and retried with the same counter: acknowledge again. */
             ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_PAIR_CONFIG_ACK, msg));
         }
         return;
     }
-    if (retry || !pairing_is_expected_panel(src)) {
-        return;
+    if (retry) {
+        return;  /* defensive: a failed identity_save closes the window, so accept_message() rejects retries */
     }
     identity_t identity = { .apartment = msg->apartment, .channel = msg->channel, .session = msg->session };
     memcpy(identity.panel_mac, src, DB_MAC_LEN);
@@ -90,7 +101,7 @@ static void handle_pair_config(const uint8_t src[DB_MAC_LEN], const db_msg_t *ms
     heartbeat_start();
 }
 
-/* Runs in the db_proto task, after authentication and the replay check. */
+/* Runs in the db_proto task, after accept_message() and the replay check. */
 static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const uint8_t *body, size_t body_len,
                        bool retry)
 {
@@ -100,12 +111,8 @@ static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const
         handle_pair_config(src, msg, retry);
         return;
     }
-    identity_t identity;
-    if (!get_identity(&identity) || memcmp(src, identity.panel_mac, DB_MAC_LEN) != 0) {
-        return;  /* only the paired panel is accepted */
-    }
-    if (msg->opcode != DB_OP_RING || msg->apartment != identity.apartment || msg->session != identity.session) {
-        return;  /* messages of an earlier pairing session are dropped */
+    if (msg->opcode != DB_OP_RING) {
+        return;
     }
     if (!retry) {  /* a retry is acknowledged again, the bell does not ring twice */
         ESP_LOGI(TAG, "ring");
@@ -218,7 +225,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(pairing_init());
     ESP_ERROR_CHECK(heartbeat_init(on_heartbeat_due));
-    ESP_ERROR_CHECK(db_proto_init(on_message, pairing_on_hello));
+    ESP_ERROR_CHECK(db_proto_init(on_message, accept_message, pairing_on_hello));
     ESP_ERROR_CHECK(xTaskCreate(app_task, "apartment", APP_TASK_STACK, NULL, APP_TASK_PRIO, NULL) == pdPASS
                     ? ESP_OK : ESP_ERR_NO_MEM);
 

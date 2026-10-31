@@ -72,6 +72,15 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
 - The check runs once, in `db_proto`, for every authenticated frame before it is dispatched (as the anti-replay
   check of IPsec, DTLS and the BLE Mesh network layer): a lower counter is dropped, a higher one is stored. The
   application handler gets a `retry` flag instead of calling the check itself.
+- Only a frame from a current peer may change replay state. The application key is shared by the building
+  (ADR 0014), so a valid tag does not prove that: a frame captured in an earlier session, or sent by a deleted
+  module, would otherwise raise the stored counter, and the re-paired module, counting from 1 again, would be
+  rejected until it caught up. Before the replay check, `db_proto` therefore asks the application
+  (`db_proto_accept_t`): registered MAC, its apartment number and current session on the panel; paired panel and
+  session on the module, or the panel of the open pairing window for `PAIR_CONFIG`. An ACK is checked only when it
+  answers the request this device is waiting for (peer, session, opcode and counter).
+- The body length is checked per opcode before the replay check: 0 bytes for commands and ACKs, `db_health_t` for
+  `HEARTBEAT`; other lengths and unknown opcodes are dropped and counted as rejected.
 - Same counter as the last accepted one = retry: the ACK is sent again, the action is not repeated. A repeated ACK is
   ignored.
 - A message whose counter cannot be read or stored is not accepted. If the own send counter cannot be read at boot,
@@ -83,7 +92,9 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
   the failure count restarts, the next lockout is multiplied by `DB_LOCKOUT_MULTIPLIER` up to the maximum, and a correct
   code resets the level.
 - Codes: changed codes in NVS `db_codes`, else the factory partition `fctry` (namespace `factory`); constant-time compare.
-- Registry: NVS `db_registry`, one MAC per apartment, cached in RAM.
+- Registry: NVS `db_registry`, one MAC per apartment and one apartment per MAC, cached in RAM. Pairing a module
+  that is still registered under another number (it was reset without its record being deleted) replaces that
+  record; otherwise two records would hold the MAC and messages would match the old one.
 - Pairing: wait for the first `PAIR_HELLO` in the window and answer it with `PAIR_HELLO_ACK` at once, so that
   module stops hopping; then listen for one module cycle (`3 x DB_CHANNEL_DWELL_MS`) for a second module: more than
   one module MAC: cancelled. Then the espnow_sec handshake (`espnow_sec_initiator_start` with that MAC, preceded by
@@ -96,7 +107,8 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
 ### Apartment module
 - Identity (apartment, channel, panel MAC) in NVS `db_identity`; the key is stored by esp-now.
 - Pairing button (only when unpaired): responder on; on each candidate channel it broadcasts `PAIR_HELLO` and waits
-  `DB_CHANNEL_DWELL_MS` for `PAIR_HELLO_ACK`. The first answer locks the channel and the panel MAC; it then accepts
+  `DB_CHANNEL_DWELL_MS` for `PAIR_HELLO_ACK`. The first answer locks the panel MAC and the channel the answer was
+  received on (not the channel the hopping loop ended on, which can already be the next one); it then accepts
   `ESP_EVENT_ESPNOW_SEC_OK` and `PAIR_CONFIG` only from that panel.
   An unpaired module holds no key: a window that ends without configuration erases any stored key (the responder
   stores the key of whichever initiator completes first), and a key found at boot without an identity is erased.

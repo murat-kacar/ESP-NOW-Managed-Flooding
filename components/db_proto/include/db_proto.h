@@ -66,10 +66,20 @@ typedef struct {
 } db_proto_stats_t;
 
 /**
- * @brief Called in the protocol task for every authenticated non-ACK message that passed the replay check
- * (ADR 0002, ADR 0015).
+ * @brief Called in the protocol task for every authenticated non-ACK message, before the replay check: true if the
+ * sender may send this message in its current pairing session (ADR 0012).
  *
- * @param body      opcode-specific body (NULL when body_len is 0); the handler checks its length
+ * The application key is shared by the building, so a valid tag does not prove the sender is a current peer. A
+ * message this function rejects changes no replay state: a frame captured in an earlier session, or sent by a
+ * deleted module, cannot advance the counter of the current one.
+ */
+typedef bool (*db_proto_accept_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg);
+
+/**
+ * @brief Called in the protocol task for every authenticated non-ACK message that was accepted and passed the replay
+ * check (ADR 0002, ADR 0015).
+ *
+ * @param body      opcode-specific body (NULL when body_len is 0); its length is already checked for the opcode
  * @param retry     true when the counter equals the last accepted one: a retry of a command already delivered.
  *                  Reply again, do not repeat the action (SPEC 7.4). Always false for reports.
  */
@@ -79,8 +89,10 @@ typedef void (*db_proto_handler_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t
 /**
  * @brief Called in the protocol task for an unauthenticated pairing discovery frame (DB_OP_PAIR_HELLO or
  * DB_OP_PAIR_HELLO_ACK). It grants nothing: the handshake and the authenticated PAIR_CONFIG follow.
+ *
+ * @param channel  Wi-Fi channel the frame was received on (discovery frames are not forwarded)
  */
-typedef void (*db_proto_hello_handler_t)(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode);
+typedef void (*db_proto_hello_handler_t)(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode, uint8_t channel);
 
 /**
  * @brief Register the esp-now data handler and start the protocol task. db_net_init() must run first.
@@ -88,7 +100,7 @@ typedef void (*db_proto_hello_handler_t)(const uint8_t src[DB_MAC_LEN], db_opcod
  * @return ESP_FAIL or an NVS error if the stored send counter cannot be read: sending with an unknown counter could
  *         reuse values.
  */
-esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_hello_handler_t hello_handler);
+esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_accept_t accept, db_proto_hello_handler_t hello_handler);
 
 /** @brief Send a pairing discovery frame (plaintext, not forwarded). dest may be the broadcast address. */
 esp_err_t db_proto_send_hello(const uint8_t dest[DB_MAC_LEN], db_opcode_t opcode);

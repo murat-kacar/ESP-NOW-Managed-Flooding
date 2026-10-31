@@ -81,6 +81,7 @@ Yönetici şifresi 6 hanedir. Tüm komutlar `*` ile başlar, `#` ile biter.
 - Hatalar sürerse kilit süresi her seferinde iki katına çıkar (120, 240 saniye …), en fazla 15 dakika.
 - Doğru şifre girilince kilit seviyesi sıfırlanır.
 - Kilit sırasında zil çalınabilir.
+- Yanlış yazılmış giriş (örneğin `**#` ya da `* 1234 * #`) hata gösterir ama yanlış şifre sayılmaz.
 
 ---
 
@@ -123,8 +124,8 @@ Modüldeki gizli **sıfırlama butonunu** **7–12 saniye** basılı tutup bıra
 - 7. saniyede LED sabit yanmaya başlar (arada kısa söner). **Bu sırada bırakın** (7–12 saniye arası); 15 saniyede
   LED üçlü flaş yapar ve işlem iptal olur.
 - Modülün eşleştirme bilgileri silinir, modül yeniden başlar ve eşleşmemiş duruma döner.
-- Paneldeki daire kaydı silinmez; aynı daire numarasıyla yeniden eşleştirmek için önce panelden kaydı silin
-  (bölüm 4).
+- Paneldeki daire kaydı silinmez. Aynı daire numarasıyla yeniden eşleştirmek için önce panelden kaydı silin
+  (bölüm 4). Modülü **başka** bir numarayla eşleştirirseniz eski kaydı otomatik olarak silinir.
 
 ### 6.3. Bina sıfırlama
 ```text

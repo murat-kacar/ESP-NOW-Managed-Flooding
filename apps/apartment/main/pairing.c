@@ -28,6 +28,7 @@ static bool s_active;
 static bool s_found;            /* the panel answered our HELLO: stay on this channel */
 static bool s_handshake_done;
 static uint8_t s_panel_mac[DB_MAC_LEN];  /* from HELLO_ACK, confirmed by ESP_EVENT_ESPNOW_SEC_OK */
+static uint8_t s_panel_channel;          /* channel the HELLO_ACK was received on */
 static uint8_t s_channels[DB_CHANNEL_CANDIDATE_COUNT];
 
 static bool is_active(void)
@@ -49,15 +50,20 @@ static void discovery_task(void *arg)
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CONFIG_DB_CHANNEL_DWELL_MS));
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (s_found) {
-        ESP_LOGI(TAG, "panel " MACSTR " answered on channel %u", MAC2STR(s_panel_mac), db_net_get_channel());
-    }
+    const bool found = s_found;
+    const uint8_t channel = s_panel_channel;
     s_discovery_task = NULL;
     xSemaphoreGive(s_lock);
+    if (found) {
+        /* The HELLO_ACK may be processed after this task already moved to the next channel: stay on the channel
+         * the answer was received on, not on the channel the loop ended on. */
+        ESP_ERROR_CHECK_WITHOUT_ABORT(db_net_set_channel(channel));
+        ESP_LOGI(TAG, "panel " MACSTR " answered on channel %u", MAC2STR(s_panel_mac), channel);
+    }
     vTaskDelete(NULL);
 }
 
-void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode)
+void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode, uint8_t channel)
 {
     if (opcode != DB_OP_PAIR_HELLO_ACK) {
         return;
@@ -65,6 +71,7 @@ void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (s_active && !s_found) {
         s_found = true;
+        s_panel_channel = channel;
         memcpy(s_panel_mac, src, DB_MAC_LEN);
         if (s_discovery_task) {
             xTaskNotifyGive(s_discovery_task);

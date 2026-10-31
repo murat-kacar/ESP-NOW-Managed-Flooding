@@ -82,11 +82,13 @@ def format_mac(mac: tuple[int, ...]) -> str:
 
 
 def probe(port: str) -> dict[str, Any]:
-    """Identify the chip on a port, then reset it back into its application."""
+    """Identify the chip and its security state (eFuses, read by the ROM loader), then reset it to its application."""
     with detect_chip(port) as esp:
         info = {
             "chip": esp.get_chip_description(),
             "mac": format_mac(esp.read_mac()),
+            "secure_boot": bool(esp.get_secure_boot_enabled()),
+            "flash_encryption": bool(esp.get_flash_encryption_enabled()),
         }
         esp.hard_reset()
     return info

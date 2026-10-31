@@ -40,8 +40,9 @@ esp_err_t pairing_init(void)
     return ESP_OK;
 }
 
-void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode)
+void pairing_on_hello(const uint8_t src[DB_MAC_LEN], db_opcode_t opcode, uint8_t channel)
 {
+    (void)channel;  /* the panel stays on its own channel */
     if (opcode != DB_OP_PAIR_HELLO) {
         return;
     }
@@ -183,6 +184,16 @@ esp_err_t pairing_run(uint8_t apartment)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "pairing failed: %s", esp_err_to_name(err));
         return err;
+    }
+
+    /* One record per module: a module that was reset without its record being deleted gets its new number, and its
+     * old record goes. Otherwise both records would hold the MAC and messages would match the old one. */
+    uint8_t previous;
+    registry_entry_t old;
+    if (registry_find(entry.mac, &previous, &old)) {
+        ESP_LOGW(TAG, "module " MACSTR " was registered as apartment %u: that record is replaced", MAC2STR(entry.mac),
+                 previous);
+        ESP_RETURN_ON_ERROR(registry_remove(previous), TAG, "removing the old record failed");
     }
 
     /* A new session invalidates every message of an earlier pairing of this MAC, so its counter can restart

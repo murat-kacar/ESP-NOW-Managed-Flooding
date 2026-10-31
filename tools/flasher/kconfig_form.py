@@ -151,7 +151,9 @@ class ConfigForm(ttk.Frame):
         self._kconfig = load_kconfig(role)
         self._sections = self._find_sections()
         self._tracked = [n for _, tops in self._sections for top in tops for n in self._option_nodes(top)]
-        self._defaults = self._snapshot()
+        # Defaults of options that are visible now. A hidden option (its parent is off) has no value yet: kconfiglib
+        # reports "" for it, so its default is taken when it first becomes visible (see _render_option).
+        self._defaults = {node.item.name: self._value(node.item) for node in self._tracked if node.item.visibility}
         self._render()
         self._scroll.scroll_to_top()
 
@@ -175,8 +177,8 @@ class ConfigForm(ttk.Frame):
         self._apply_entries()
         lines = []
         for name, value in self._snapshot().items():
-            if value == self._defaults.get(name):
-                continue
+            if name not in self._defaults or value == self._defaults[name]:
+                continue  # never shown, so never changed; or unchanged
             sym = self._kconfig.syms[value] if name in self._kconfig.named_choices else self._kconfig.syms[name]
             lines.append(sym.config_string)
         return "".join(lines)
@@ -206,15 +208,14 @@ class ConfigForm(ttk.Frame):
             return [n for n in _walk(top.list) if _is_option(n)]
         return [top] if _is_option(top) else []
 
+    @staticmethod
+    def _value(item) -> str:
+        if isinstance(item, kc.Choice):
+            return item.selection.name if item.selection else ""
+        return item.str_value
+
     def _snapshot(self) -> dict[str, str]:
-        values = {}
-        for node in self._tracked:
-            item = node.item
-            if isinstance(item, kc.Choice):
-                values[item.name] = item.selection.name if item.selection else ""
-            else:
-                values[item.name] = item.str_value
-        return values
+        return {node.item.name: self._value(node.item) for node in self._tracked}
 
     def _apply_entries(self) -> None:
         for name, var in self._entries.items():
@@ -282,6 +283,9 @@ class ConfigForm(ttk.Frame):
         item = node.item
         if not item.visibility:
             return
+        # First time visible: the user could not edit it while hidden, so its value now is its default under the
+        # current parent settings.
+        self._defaults.setdefault(item.name, self._value(item))
         if isinstance(item, kc.Choice):
             self._choice_field(node, item, depth)
         else:
@@ -324,7 +328,7 @@ class ConfigForm(ttk.Frame):
 
     def _symbol_field(self, node, sym: kc.Symbol, depth: int) -> None:
         label = ttk.Label(self._scroll.inner, text=node.prompt[0], wraplength=LABEL_WRAP)
-        default = self._defaults.get(sym.name, sym.str_value)
+        default = self._defaults[sym.name]
         if sym.type == kc.BOOL:
             var = tk.BooleanVar(value=sym.str_value == "y")
 

@@ -43,6 +43,14 @@ async def probe(runner: JobRunner, port: str) -> dict[str, Any]:
     return info or {}
 
 
+async def _probe_writable(runner: JobRunner, port: str) -> dict[str, Any]:
+    """Probe before every write: a device with secure boot or flash encryption on is not written over serial."""
+    device = await probe(runner, port)
+    if device.get("secure_boot") or device.get("flash_encryption"):
+        raise JobError("secure boot or flash encryption is enabled on this device: serial writes are refused")
+    return device
+
+
 async def scan(runner: JobRunner, port: str) -> None:
     info = await runner.worker(port, "scan", "--port", port)
     runner.post(port, "info", info)
@@ -52,7 +60,7 @@ async def flash(
     runner: JobRunner, port: str, role: str, profile: str, firmware: Path, codes: FactoryCodes | None,
 ) -> None:
     """Write the merged image at 0x0 and, for roles with factory data, the per-device factory NVS."""
-    device = await probe(runner, port)
+    device = await _probe_writable(runner, port)
     # The generated factory NVS image is temporary; only the history row is kept.
     with tempfile.TemporaryDirectory(prefix="fctry-") as tmp:
         files = ["0x0", str(firmware)]
@@ -67,7 +75,7 @@ async def flash(
 
 async def flash_factory_nvs(runner: JobRunner, port: str, role: str, profile: str, codes: FactoryCodes) -> None:
     """Rewrite only the factory NVS partition (codes)."""
-    device = await probe(runner, port)
+    device = await _probe_writable(runner, port)
     partition = _factory_partition(role)
     with tempfile.TemporaryDirectory(prefix="fctry-") as tmp:
         nvs_bin = await _generate_factory_nvs(runner, port, codes, partition.size, Path(tmp))
@@ -76,11 +84,13 @@ async def flash_factory_nvs(runner: JobRunner, port: str, role: str, profile: st
 
 
 async def erase_flash(runner: JobRunner, port: str) -> None:
+    await _probe_writable(runner, port)
     await runner.worker(port, *_esptool(port, "erase-flash"))
 
 
 async def factory_reset(runner: JobRunner, port: str) -> None:
     """Erase the user NVS partition; the factory partition is kept."""
+    await _probe_writable(runner, port)
     parttool = idf_path() / "components" / "partition_table" / "parttool.py"
     await runner.command(
         port, sys.executable, str(parttool), "--port", port,

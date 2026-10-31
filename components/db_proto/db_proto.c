@@ -76,7 +76,8 @@ typedef enum {
 
 typedef struct {
     uint8_t src[DB_MAC_LEN];
-    int8_t rssi;  /* of the received copy, i.e. of the last hop when the frame was forwarded */
+    int8_t rssi;      /* of the received copy, i.e. of the last hop when the frame was forwarded */
+    uint8_t channel;  /* Wi-Fi channel the copy was received on */
     size_t size;
     union {
         uint8_t frame[FRAME_MAX];
@@ -99,6 +100,7 @@ typedef struct {
 } peer_seen_t;
 
 static db_proto_handler_t s_handler;
+static db_proto_accept_t s_accept;
 static db_proto_hello_handler_t s_hello_handler;
 static uint8_t s_own_mac[DB_MAC_LEN];
 static QueueHandle_t s_rx_queue;
@@ -226,6 +228,24 @@ static bool is_ack(uint8_t opcode)
 static bool is_discovery(uint8_t opcode)
 {
     return opcode == DB_OP_PAIR_HELLO || opcode == DB_OP_PAIR_HELLO_ACK;
+}
+
+/* Body length each opcode must carry (SPEC 7.2); -1 for opcodes that are not authenticated messages. */
+static int expected_body_len(uint8_t opcode)
+{
+    switch (opcode) {
+    case DB_OP_RING:
+    case DB_OP_RING_ACK:
+    case DB_OP_OPEN_DOOR:
+    case DB_OP_OPEN_DOOR_ACK:
+    case DB_OP_PAIR_CONFIG:
+    case DB_OP_PAIR_CONFIG_ACK:
+        return 0;
+    case DB_OP_HEARTBEAT:
+        return (int)sizeof(db_health_t);
+    default:
+        return -1;  /* discovery opcodes travel only in plaintext discovery frames; others are unknown */
+    }
 }
 
 /* Reports change no state, so their replay check stays in RAM (ADR 0015). */
@@ -365,7 +385,7 @@ static esp_err_t on_espnow_data(uint8_t *src_addr, void *data, size_t size, wifi
     if (size != sizeof(hello_frame_t) && (size < FRAME_MIN || size > FRAME_MAX)) {
         return ESP_OK;
     }
-    rx_item_t item = { .size = size, .rssi = (int8_t)rx_ctrl->rssi };
+    rx_item_t item = { .size = size, .rssi = (int8_t)rx_ctrl->rssi, .channel = (uint8_t)rx_ctrl->channel };
     memcpy(item.src, src_addr, DB_MAC_LEN);
     memcpy(&item.data, data, size);
     if (xQueueSend(s_rx_queue, &item, 0) != pdTRUE) {
@@ -374,27 +394,28 @@ static esp_err_t on_espnow_data(uint8_t *src_addr, void *data, size_t size, wifi
     return ESP_OK;
 }
 
-static void handle_ack(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
+/* An ACK is accepted only for the request this device is waiting for: same peer, session, opcode and counter. */
+static bool ack_expected(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool expected = s_pending.active && s_pending.ack_opcode == msg->opcode &&
                     s_pending.session == msg->session && s_pending.counter == msg->ack_counter &&
                     memcmp(s_pending.dest, src, DB_MAC_LEN) == 0;
     xSemaphoreGive(s_lock);
-    if (expected) {
-        xSemaphoreGive(s_ack);
-    }
+    return expected;
 }
 
-static void handle_hello(const uint8_t src[DB_MAC_LEN], int rssi, const hello_frame_t *hello)
+static void handle_hello(const uint8_t src[DB_MAC_LEN], int rssi, uint8_t channel, const hello_frame_t *hello)
 {
     if (hello->version == DB_PROTO_VERSION && s_hello_handler && is_discovery(hello->opcode)) {
-        ESP_LOGI(TAG, "discovery opcode %u from " MACSTR ", RSSI %d dBm", hello->opcode, MAC2STR(src), rssi);
-        s_hello_handler(src, (db_opcode_t)hello->opcode);
+        ESP_LOGI(TAG, "discovery opcode %u from " MACSTR " on channel %u, RSSI %d dBm", hello->opcode, MAC2STR(src),
+                 channel, rssi);
+        s_hello_handler(src, (db_opcode_t)hello->opcode, channel);
     }
 }
 
-/* Authentication, version and replay checks, then dispatch (ADR 0012). */
+/* Authentication, version, body length, sender and replay checks, then dispatch (ADR 0012). Only a frame that
+ * passes the checks before the replay check can change replay state. */
 static void handle_message(const uint8_t src[DB_MAC_LEN], int rssi, const uint8_t *frame, size_t len)
 {
     if (!verify(src, frame, len)) {
@@ -418,19 +439,30 @@ static void handle_message(const uint8_t src[DB_MAC_LEN], int rssi, const uint8_
         count_rejected();
         return;
     }
-    if (is_discovery(msg.opcode)) {
-        return;  /* discovery opcodes are only valid in plaintext discovery frames */
+    if (expected_body_len(msg.opcode) != (int)body_len) {
+        ESP_LOGW(TAG, "opcode %u with a %u-byte body dropped", msg.opcode, (unsigned)body_len);
+        count_rejected();
+        return;
+    }
+    if (is_ack(msg.opcode)) {
+        if (!ack_expected(src, &msg)) {
+            ESP_LOGD(TAG, "ACK for no pending request dropped");  /* e.g. a late ACK of a finished request */
+            return;
+        }
+        if (check_counter(src, msg.counter, true) == REPLAY_NEW) {  /* a repeated ACK carries nothing new */
+            xSemaphoreGive(s_ack);
+        }
+        return;
+    }
+    if (!s_accept(src, &msg)) {
+        ESP_LOGW(TAG, "opcode %u from " MACSTR " dropped: not a current peer or session", msg.opcode, MAC2STR(src));
+        count_rejected();
+        return;
     }
     replay_t replay = check_counter(src, msg.counter, !is_report(msg.opcode));
     if (replay == REPLAY_OLD) {
         ESP_LOGW(TAG, "old counter %" PRIu32 " from " MACSTR " dropped", (uint32_t)msg.counter, MAC2STR(src));
         count_rejected();
-        return;
-    }
-    if (is_ack(msg.opcode)) {
-        if (replay == REPLAY_NEW) {  /* a repeated ACK carries nothing new */
-            handle_ack(src, &msg);
-        }
         return;
     }
     s_handler(src, &msg, body, body_len, replay == REPLAY_RETRY);
@@ -446,16 +478,16 @@ static void protocol_task(void *arg)
             continue;
         }
         if (item.size == sizeof(hello_frame_t)) {
-            handle_hello(item.src, item.rssi, &item.data.hello);
+            handle_hello(item.src, item.rssi, item.channel, &item.data.hello);
         } else {
             handle_message(item.src, item.rssi, item.data.frame, item.size);
         }
     }
 }
 
-esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_hello_handler_t hello_handler)
+esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_accept_t accept, db_proto_hello_handler_t hello_handler)
 {
-    ESP_RETURN_ON_FALSE(handler != NULL, ESP_ERR_INVALID_ARG, TAG, "handler is required");
+    ESP_RETURN_ON_FALSE(handler != NULL && accept != NULL, ESP_ERR_INVALID_ARG, TAG, "handlers are required");
     ESP_RETURN_ON_FALSE(s_rx_queue == NULL, ESP_ERR_INVALID_STATE, TAG, "already initialised");
     ESP_RETURN_ON_FALSE(psa_crypto_init() == PSA_SUCCESS, ESP_FAIL, TAG, "psa_crypto_init failed");
     ESP_RETURN_ON_ERROR(esp_wifi_get_mac(WIFI_IF_STA, s_own_mac), TAG, "reading the MAC failed");
@@ -470,6 +502,7 @@ esp_err_t db_proto_init(db_proto_handler_t handler, db_proto_hello_handler_t hel
     ESP_LOGI(TAG, "send counter resumes at %" PRIu32, s_counter + 1);
 
     s_handler = handler;
+    s_accept = accept;
     s_hello_handler = hello_handler;
     s_lock = xSemaphoreCreateMutex();
     s_request_lock = xSemaphoreCreateMutex();

@@ -110,6 +110,8 @@ Input is also cleared automatically after 10 s of inactivity.
 - If errors continue, the lockout doubles (120, 240 s, …) up to 15 min. After each lockout the failure count restarts;
   a correct code resets the lockout level (ADR 0012).
 - Ringing is never blocked during a lockout.
+- Malformed input with an empty field (two `*` in a row, or `*` right before `#`, for example `**#`) shows an error
+  and is not counted as a wrong code.
 
 ---
 
@@ -137,6 +139,7 @@ Pairing is done **next to the panel**. The espnow_sec key exchange only works wi
 ### 5.2. Rules
 - No PoP is used (accepted risk, ADR 0007).
 - An occupied apartment number is never overwritten; the request is rejected.
+- A module is registered under one number only: pairing a reset module to another number replaces its old record.
 - A paired module cannot be paired again without a reset (the responder ignores new handshakes once configured).
 - Delete an apartment record: `* <admin_code> * 2 * <apartment_no> * <apartment_no> #`. Deleting also removes that apartment's replay counter record.
 

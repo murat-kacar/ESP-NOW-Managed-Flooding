@@ -46,6 +46,7 @@ class DeviceRow(ttk.LabelFrame):
         self.busy = False
         self.locked = False  # secure boot or flash encryption enabled: no serial writes
         self._images: dict[str, Path] = {}
+        self._info: dict[str, Any] = {}  # latest known device facts; a probe does not erase what a scan found
 
         self.info_var = tk.StringVar(value="Not probed")
         ttk.Label(self, textvariable=self.info_var).grid(row=0, column=0, sticky="w")
@@ -159,6 +160,10 @@ class DeviceRow(ttk.LabelFrame):
     def set_info(self, info: dict[str, Any] | None) -> None:
         if not info:
             return
+        if info.get("mac") != self._info.get("mac"):
+            self._info = {}  # another device on this port
+        self._info.update(info)
+        info = self._info
         parts = [info.get("chip", "?"), f"MAC {info.get('mac', '?')}"]
         if "flash_size" in info:
             parts.append(f"flash {info['flash_size']}")

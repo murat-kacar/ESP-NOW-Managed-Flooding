@@ -157,15 +157,21 @@ static void process(void)
         return;
     }
 
+    /* Split at every '*'. strtok_r() would merge "**" and drop a trailing '*', so malformed input such as "**1234#"
+     * would pass as a command. An empty field is a format error: it shows an error but is not a wrong code. */
     char *tokens[MAX_TOKENS];
     int count = 0;
-    char *save = NULL;
-    for (char *token = strtok_r(s_buffer + 1, "*", &save); token; token = strtok_r(NULL, "*", &save)) {
-        if (count == MAX_TOKENS) {
+    for (char *field = s_buffer + 1; field != NULL; ) {
+        char *star = strchr(field, '*');
+        if (star != NULL) {
+            *star = '\0';
+        }
+        if (count == MAX_TOKENS || *field == '\0') {
             show_error();
             return;
         }
-        tokens[count++] = token;
+        tokens[count++] = field;
+        field = star != NULL ? star + 1 : NULL;
     }
     if (count == 1 && codes_is_user(tokens[0])) {
         code_accepted();
