@@ -5,6 +5,7 @@
 #include "db_net.h"
 #include "db_proto.h"
 #include "db_status_led.h"
+#include "db_wdt.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -102,14 +103,39 @@ static esp_err_t handshake(const uint8_t mac[DB_MAC_LEN])
     return err;
 }
 
+/* The pairing runs in the supervised application task: long waits are cut into watchdog feed periods
+ * (ADR 0016). */
+static bool take_supervised(SemaphoreHandle_t semaphore, int64_t deadline_us)
+{
+    for (;;) {
+        db_wdt_feed();
+        TickType_t left = ticks_until(deadline_us);
+        if (xSemaphoreTake(semaphore, left < DB_WDT_FEED_TICKS ? left : DB_WDT_FEED_TICKS) == pdTRUE) {
+            return true;
+        }
+        if (ticks_until(deadline_us) == 0) {
+            return false;
+        }
+    }
+}
+
+static void delay_supervised(uint32_t ms)
+{
+    const int64_t until_us = esp_timer_get_time() + (int64_t)ms * 1000;
+    for (TickType_t left = ticks_until(until_us); left > 0; left = ticks_until(until_us)) {
+        db_wdt_feed();
+        vTaskDelay(left < DB_WDT_FEED_TICKS ? left : DB_WDT_FEED_TICKS);
+    }
+}
+
 /* Discovery and handshake inside the window; retries the handshake until the window ends. */
 static esp_err_t find_and_handshake(uint8_t mac[DB_MAC_LEN])
 {
     const int64_t deadline_us = esp_timer_get_time() + (int64_t)CONFIG_DB_PAIRING_WINDOW_S * 1000000;
-    if (xSemaphoreTake(s_hello_seen, ticks_until(deadline_us)) != pdTRUE) {
+    if (!take_supervised(s_hello_seen, deadline_us)) {
         return ESP_ERR_NOT_FOUND;
     }
-    vTaskDelay(pdMS_TO_TICKS(COLLECT_MS));
+    delay_supervised(COLLECT_MS);
     if (module_count(mac) > 1) {
         ESP_LOGW(TAG, "more than one unpaired module answered: pairing cancelled (ADR 0007)");
         return ESP_ERR_INVALID_RESPONSE;
@@ -118,6 +144,7 @@ static esp_err_t find_and_handshake(uint8_t mac[DB_MAC_LEN])
 
     esp_err_t err = ESP_ERR_NOT_FOUND;
     while (esp_timer_get_time() < deadline_us) {
+        db_wdt_feed();  /* one pass: a handshake (about 3 s) and at most one dwell */
         /* The module stays on this channel; a lost HELLO_ACK makes this handshake fail and is retried. */
         ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_send_hello(mac, DB_OP_PAIR_HELLO_ACK));
         err = handshake(mac);

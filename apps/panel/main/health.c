@@ -100,9 +100,11 @@ void health_on_report(uint8_t apartment, const db_health_t *report)
     const bool faults = report->door_unacknowledged > 0 || report->frames_rejected > 0;
     ESP_LOG_LEVEL_LOCAL(faults ? ESP_LOG_WARN : ESP_LOG_INFO, TAG,  /* like ESP_LOGx, with a runtime level */
                         "apartment %u: up %" PRIu32 " s (last restart: %s), rings %" PRIu32 ", door requests %" PRIu32
-                        " (%" PRIu32 " unacknowledged), rejected frames %" PRIu32 ", RSSI at the module %d dBm",
+                        " (%" PRIu32 " unacknowledged), rejected frames %" PRIu32 ", RSSI at the module %d dBm"
+                        ", free heap %" PRIu32 " B (lowest %" PRIu32 " B)",
                         apartment, report->uptime_s, reset_reason_name(report->reset_reason), report->rings,
-                        report->door_requests, report->door_unacknowledged, report->frames_rejected, report->last_rssi);
+                        report->door_requests, report->door_unacknowledged, report->frames_rejected, report->last_rssi,
+                        report->free_heap, report->min_free_heap);
 }
 
 void health_on_paired(uint8_t apartment)

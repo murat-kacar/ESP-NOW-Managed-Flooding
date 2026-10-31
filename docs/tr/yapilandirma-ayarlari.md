@@ -57,8 +57,9 @@ dairenin hata göstermesi gecikir. Monitördeki `acknowledged after ... ms` sat�
 ileri atlar; bu bir sorun değildir. Küçük değer daha sık flash yazımı demektir.
 
 **Heartbeat (durum raporu):** Rapor; modülün ne kadar süredir açık olduğunu, son yeniden başlama nedenini (elektrik
-kesintisi, brownout, watchdog …), aldığı zil sayısını, cevapsız kalan kapı açma isteklerini, reddettiği mesajları ve
-panelden gelen son sinyalin gücünü (RSSI) içerir. Panelin monitöründe her daire için bir satır görünür; hata varsa
+kesintisi, brownout, watchdog …), aldığı zil sayısını, cevapsız kalan kapı açma isteklerini, reddettiği mesajları,
+panelden gelen son sinyalin gücünü (RSSI) ve boş belleği (şu anki ve yeniden başladığından beri en düşük) içerir. En
+düşük boş bellek zamanla sürekli azalıyorsa yazılımda bellek sızıntısı vardır. Panelin monitöründe her daire için bir satır görünür; hata varsa
 satır uyarı olarak çıkar. Bir modülden 3 aralık boyunca rapor gelmezse panel "no report" uyarısı yazar.
 - **Aralık örneği:** 30 s ise 4. kattaki modülün durumu yarım dakikada bir panele gelir; susarsa 90 saniye sonra
   uyarı çıkar. Bu kısa aralık **sadece birkaç modülle yapılan testler** içindir: rapor her modül tarafından aktarıldığı
@@ -230,7 +231,8 @@ kendi bileşenlerine aittir. Bir sebep olmadıkça varsayılanda bırakın.
 | LED Indicator | LED'in PWM frekansı ve çözünürlüğü |
 | CPU frequency | İşlemci hızı |
 | Brownout detector | Besleme gerilimi düşünce cihazı güvenli şekilde yeniden başlatır. **Açık kalmalı.** |
-| Task / interrupt watchdog | Kilitlenen yazılımı tespit edip cihazı yeniden başlatır. Açık kalmalı. |
+| Interrupt watchdog | Kesmeleri uzun süre kapatan bir hatada cihazı yeniden başlatır (300 ms). Açık kalmalı. |
+| Task watchdog / panic / timeout | Kilitlenen veya CPU'yu bırakmayan bir görevde cihazı yeniden başlatır. Bu projede panic **açık**, süre **30 s**; protokol ve uygulama görevleri de izlenir (ADR 0016). Panic kapatılırsa watchdog sadece uyarı yazar. Süreyi 30 s'nin altına indirmeyin: eşleştirmedeki anahtar değişimi yaklaşık 3 s bloklar. |
 | Console UART / baud rate | Seri monitör portu ve hızı |
 | Flash mode / frequency / size | Flash bellek ayarları. Boyut 2 MB'tır; kartla uyumlu olmalı. |
 | Default log verbosity | Monitörde ne kadar ayrıntı görüneceği. Info varsayılandır; Debug çok daha fazla satır üretir. |

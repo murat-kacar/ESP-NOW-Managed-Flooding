@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "db_nvs.h"
+#include "db_wdt.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -54,12 +55,17 @@ typedef struct __attribute__((packed)) {
 /* The wire format (SPEC 7.2) is the in-memory layout: fixed sizes, little-endian fields. */
 _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the wire format is little-endian");
 _Static_assert(sizeof(db_msg_t) == 16, "db_msg_t is 16 bytes on air");
-_Static_assert(sizeof(db_health_t) == 22, "db_health_t is 22 bytes on air");
+_Static_assert(sizeof(db_health_t) == 30, "db_health_t is 30 bytes on air");
 _Static_assert(sizeof(db_health_t) <= DB_BODY_MAX, "the heartbeat body must fit DB_BODY_MAX");
 _Static_assert(sizeof(hello_frame_t) == 2, "a discovery frame is 2 bytes on air");
 _Static_assert(sizeof(hello_frame_t) < FRAME_MIN, "discovery and authenticated frames differ in size");
 _Static_assert(FRAME_MAX <= ESPNOW_DATA_LEN, "the largest frame must fit one encrypted esp-now packet");
 _Static_assert(DB_MAC_LEN == ESPNOW_ADDR_LEN, "DB_MAC_LEN must match esp-now");
+#if CONFIG_ESP_TASK_WDT_EN
+/* db_proto_request() feeds the caller's watchdog once per attempt (ADR 0016). */
+_Static_assert(SEND_TIMEOUT_MS + CONFIG_DB_ACK_TIMEOUT_MS < CONFIG_ESP_TASK_WDT_TIMEOUT_S * 1000,
+               "one request attempt must be shorter than the task watchdog timeout");
+#endif
 
 /* Result of the replay check (ADR 0002, ADR 0015). */
 typedef enum {
@@ -432,9 +438,11 @@ static void handle_message(const uint8_t src[DB_MAC_LEN], int rssi, const uint8_
 
 static void protocol_task(void *arg)
 {
+    ESP_ERROR_CHECK(db_wdt_subscribe());  /* a stuck protocol task restarts the device (ADR 0016) */
     rx_item_t item;
     for (;;) {
-        if (xQueueReceive(s_rx_queue, &item, portMAX_DELAY) != pdTRUE) {
+        db_wdt_feed();
+        if (xQueueReceive(s_rx_queue, &item, DB_WDT_FEED_TICKS) != pdTRUE) {
             continue;
         }
         if (item.size == sizeof(hello_frame_t)) {
@@ -534,6 +542,7 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
         const int64_t start_us = esp_timer_get_time();
         int attempt = 0;
         for (; attempt <= retries && err != ESP_OK; attempt++) {
+            db_wdt_feed();  /* the caller may be a supervised task; one attempt is short (checked above) */
             esp_err_t sent = raw_send(dest, &frame);  /* same counter and tag on every attempt */
             if (sent != ESP_OK) {
                 ESP_LOGW(TAG, "send failed: %s", esp_err_to_name(sent));

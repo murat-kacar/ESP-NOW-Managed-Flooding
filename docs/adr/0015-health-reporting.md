@@ -33,7 +33,7 @@ few minutes from every module would make the panel write its NVS continuously an
   lost one.
 - The report body (`db_health_t`, counters since the module's last restart): uptime, reset reason
   (`esp_reset_reason()`), RINGs received, OPEN_DOOR requests sent and how many got no ACK, frames rejected by
-  `db_proto`, and the RSSI of the last authentic frame received (last hop).
+  `db_proto`, the RSSI of the last authentic frame received (last hop), and free and lowest free heap (ADR 0016).
 - `DB_HEARTBEAT` turns the feature off on both roles. Default interval 3600 s for the field; short intervals (for
   example 30 s) only for bench tests with a few modules (see the cost above).
 
@@ -56,8 +56,9 @@ few minutes from every module would make the panel write its NVS continuously an
 ### Remote restart: not implemented
 A network-wide restart command exists in other standards (for example the LwM2M Device object's Reboot resource).
 It is not added:
-- An unstable device already restarts itself: the task watchdog, the interrupt watchdog, the panic handler and the
-  brownout detector stay on (ESP-IDF defaults).
+- An unstable device restarts itself: the interrupt watchdog, the panic handler and the brownout detector are on
+  by default, and ADR 0016 makes the task watchdog restart the device and supervise the project's own tasks.
+  (This ADR first said the default task watchdog restarts; it only warns. Corrected in ADR 0016.)
 - The heartbeat reports the reset reason and uptime, so instability becomes visible at the panel and can be fixed
   at its cause. A remote restart would hide the cause.
 - An authenticated command that restarts every device is also a way to take the whole building offline.

@@ -133,6 +133,12 @@ Modüldeki gizli **sıfırlama butonunu** **7–12 saniye** basılı tutup bıra
 Tüm daire kayıtları, kanal ve şifreleme anahtarı silinir; şifreler korunur. Panel yeniden başlar ve yeni bir kanal
 seçer. **Bütün daire modülleri sıfırlanıp yeniden eşleştirilmelidir.**
 
+### 6.4. Yeniden başlatma (hiçbir şey silinmez)
+- Cihaz kilitlenirse kendini en geç 30 saniye içinde yeniden başlatır; ne olduğu panelin monitöründe görünür
+  ("last restart: task watchdog" gibi).
+- Elle yeniden başlatmak için kart üzerindeki **EN** butonuna basın ya da elektriğini kesip açın. Kutunun içine EN ile
+  GND arasına gizli bir buton da bağlanabilir. Kayıtlar, şifreler ve eşleştirme bilgileri korunur.
+
 ---
 
 ## 7. LED durumları

@@ -5,6 +5,7 @@
 #include "db_net.h"
 #include "db_proto.h"
 #include "db_status_led.h"
+#include "db_wdt.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -160,9 +161,11 @@ static void factory_reset(void)
 
 static void app_task(void *arg)
 {
+    ESP_ERROR_CHECK(db_wdt_subscribe());  /* a stuck application task restarts the module (ADR 0016) */
     app_event_t event;
     for (;;) {
-        if (xQueueReceive(s_events, &event, portMAX_DELAY) != pdTRUE) {
+        db_wdt_feed();
+        if (xQueueReceive(s_events, &event, DB_WDT_FEED_TICKS) != pdTRUE) {
             continue;
         }
         switch (event) {

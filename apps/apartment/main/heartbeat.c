@@ -70,6 +70,8 @@ esp_err_t heartbeat_send(const identity_t *identity)
         .door_requests = atomic_load(&s_door_requests),
         .door_unacknowledged = atomic_load(&s_door_unacknowledged),
         .frames_rejected = stats.frames_rejected,
+        .free_heap = esp_get_free_heap_size(),
+        .min_free_heap = esp_get_minimum_free_heap_size(),
         .reset_reason = (uint8_t)esp_reset_reason(),
         .last_rssi = stats.last_rssi,
     };

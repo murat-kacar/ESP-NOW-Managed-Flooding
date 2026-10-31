@@ -4,6 +4,7 @@
 #include "codes.h"
 #include "db_net.h"
 #include "db_nvs.h"
+#include "db_wdt.h"
 #include "db_proto.h"
 #include "db_status_led.h"
 #include "door.h"
@@ -176,9 +177,11 @@ static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const
 
 static void app_task(void *arg)
 {
+    ESP_ERROR_CHECK(db_wdt_subscribe());  /* a stuck keypad task restarts the panel (ADR 0016) */
     app_event_t event;
     for (;;) {
-        if (xQueueReceive(s_events, &event, portMAX_DELAY) != pdTRUE) {
+        db_wdt_feed();
+        if (xQueueReceive(s_events, &event, DB_WDT_FEED_TICKS) != pdTRUE) {
             continue;
         }
         switch (event.type) {

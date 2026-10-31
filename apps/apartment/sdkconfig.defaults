@@ -4,3 +4,8 @@ CONFIG_ESP32_REV_MIN_3=y
 # espnow_sec uses protocomm security v1, which is off by default since ESP-IDF 6.x.
 # Same setting as every espressif/esp-now example's sdkconfig.defaults.
 CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y
+
+# ADR 0016: a task that stops feeding the task watchdog restarts the device. 30 s covers the longest
+# legitimate wait between two feeds (one esp-now handshake, about 3 s) with margin.
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30

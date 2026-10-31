@@ -53,6 +53,8 @@ typedef struct __attribute__((packed)) {
     uint32_t door_requests;        /**< OPEN_DOOR requests sent */
     uint32_t door_unacknowledged;  /**< OPEN_DOOR requests that got no ACK after all attempts */
     uint32_t frames_rejected;      /**< Frames dropped by db_proto: invalid tag, other version or old counter */
+    uint32_t free_heap;            /**< esp_get_free_heap_size() in bytes */
+    uint32_t min_free_heap;        /**< esp_get_minimum_free_heap_size(): lowest free heap since the restart */
     uint8_t reset_reason;          /**< esp_reset_reason_t of the last restart */
     int8_t last_rssi;              /**< RSSI of the last authentic frame received (last hop); 0 before the first */
 } db_health_t;

@@ -1,7 +1,7 @@
 # ESP32 Smart Apartment Doorbell and Access Control System — Specification
 
 Version: 2026-10-29
-Sources: original project specification + `docs/adr/0001`–`0015`
+Sources: original project specification + `docs/adr/0001`–`0016`
 
 > Every decision in this document links to its ADR. Values not yet verified by measurement or test are marked **[TO VERIFY]** and listed in section 9.
 
@@ -36,6 +36,7 @@ Exactly one per building.
 | Door relay | 23 | Active-LOW, idle HIGH. 3.3 V optocoupled relay module. ([ADR 0005](adr/0005-door-relay-output.md)) |
 | Buzzer | 4 | Passive buzzer, LEDC PWM. Sounds only while the door opens. |
 | Status LED | 2 | On-board LED, brightness via LEDC. |
+| Restart | EN | Hardware reset; optional hidden button between EN and GND. Erases nothing. ([ADR 0016](adr/0016-watchdog-supervision.md)) |
 | Hidden code reset button | 19 | Internal pull-up, pulls to GND when pressed. Inside the enclosure. |
 | Spare | 18, 21, 22 | Reserved for future use. |
 | Power | — | 5 V / 1 A DC adapter. The relay coil draws ~120 mA from the 3.3 V rail. |
@@ -50,6 +51,7 @@ One per apartment; 1–99 apartments.
 | Hidden pairing button | 18 | Internal pull-up. Hold 7–12 s and release to enter pairing mode. |
 | Hidden reset button | 19 | Internal pull-up. Hold 7–12 s and release to erase the identity. |
 | Status LED | 2 | On-board LED, brightness via LEDC. |
+| Restart | EN | Hardware reset; optional hidden button between EN and GND. Erases nothing. ([ADR 0016](adr/0016-watchdog-supervision.md)) |
 | Spare | 13, 14, 21, 22, 25, 26, 27, 32, 33 | |
 
 On the NodeMCU-32S, GPIO 18, GPIO 19 and GND are adjacent; both hidden buttons share one GND line.
@@ -189,7 +191,7 @@ typedef struct __attribute__((packed)) {
 Multi-byte fields are little-endian; the packed structure is sent as is.
 
 Every message is followed by an opcode-specific body of 0 to 32 bytes (only `HEARTBEAT` has one: `db_health_t`,
-22 bytes) and a 16-byte HMAC-SHA256 tag over source MAC, destination MAC, message and body, with a key derived from
+30 bytes) and a 16-byte HMAC-SHA256 tag over source MAC, destination MAC, message and body, with a key derived from
 the application key (32 to 64-byte frame). esp-now also delivers unencrypted frames to the application, so frames
 without a valid tag are dropped. HELLO frames carry no tag and are only used to find the channel.
 
@@ -245,6 +247,8 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
   no OTA partitions. Current panel table: single-app layout plus `fctry` (0x110000, 0x6000, readonly).
 - Accepted risks: no PoP ([ADR 0007](adr/0007-pairing-near-panel.md)); shared application key, lockout in RAM, panel
   busy while pairing, flasher code lengths ([ADR 0014](adr/0014-accepted-risks.md)).
+- Self-recovery ([ADR 0016](adr/0016-watchdog-supervision.md)): the task watchdog (30 s) restarts the device and
+  supervises the protocol and application tasks; interrupt watchdog, panic restart and brownout detector stay on.
 - Build and flashing GUI: `python -m tools.flasher` ([ADR 0010](adr/0010-flasher-gui.md)). Per-device factory NVS is generated at flash time; there is no per-device firmware build.
 
 ---
@@ -264,6 +268,7 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
 | 9 | Door relay does not engage on power-up / reset / flashing | Measurement: oscilloscope on GPIO 23, single trigger on a falling edge |
 | 10 | Voltage drop on the 3.3 V rail while the relay engages | Measurement: oscilloscope on 3V3; no brownout reset in the log |
 | 11 | Replay counter block size | Usage data |
+| 12 | A supervised task forced into an endless wait restarts the device; the panel logs reset reason "task watchdog" | Bench test |
 
 ## 10. To Define
 
