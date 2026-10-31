@@ -42,8 +42,9 @@ typedef struct __attribute__((packed)) {
     uint8_t apartment;     /**< Target or source apartment */
     uint8_t channel;       /**< DB_OP_PAIR_CONFIG: Wi-Fi channel; otherwise 0 */
     uint32_t session;      /**< Pairing session, chosen by the panel at pairing; messages of other sessions are dropped */
-    uint32_t counter;      /**< Sender's replay counter (ADR 0002) */
-    uint32_t ack_counter;  /**< ACK opcodes: counter of the acknowledged request; otherwise 0 */
+    uint32_t counter;      /**< Sender's replay counter, strictly increasing, new on every frame (ADR 0002) */
+    uint32_t request_id;   /**< Commands: counter of the request's first attempt, the same on every retry; ACKs: the
+                                request_id acknowledged; reports: 0 (ADR 0017, like the BLE Mesh TID) */
 } db_msg_t;
 
 /** Body of DB_OP_HEARTBEAT (ADR 0015). Counters count since the module's last restart. */
@@ -80,7 +81,7 @@ typedef bool (*db_proto_accept_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t 
  * check (ADR 0002, ADR 0015).
  *
  * @param body      opcode-specific body (NULL when body_len is 0); its length is already checked for the opcode
- * @param retry     true when the counter equals the last accepted one: a retry of a command already delivered.
+ * @param retry     true when the command repeats a request already executed (same request_id, ADR 0017).
  *                  Reply again, do not repeat the action (SPEC 7.4). Always false for reports.
  */
 typedef void (*db_proto_handler_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const uint8_t *body,
@@ -119,7 +120,8 @@ esp_err_t db_proto_send_body(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, cons
 esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, const db_msg_t *request);
 
 /**
- * @brief Send a request and wait for its ACK (same session); retries reuse the same counter (SPEC 7.4).
+ * @brief Send a request and wait for its ACK (same session). Each retry is a new frame with a new counter and the
+ * same request_id, so the receiver acts once (SPEC 7.4, ADR 0017).
  *
  * @return ESP_OK when the ACK arrived, ESP_ERR_TIMEOUT when all attempts went unanswered.
  *         Call from a task that may block; one request at a time per device.

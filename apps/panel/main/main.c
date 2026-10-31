@@ -43,7 +43,7 @@ static const char *TAG = "panel";
 _Static_assert(CONFIG_DB_CODE_RESET_HOLD_MIN_S < CONFIG_DB_CODE_RESET_HOLD_MAX_S,
                "DB_CODE_RESET_HOLD_MIN_S must be less than DB_CODE_RESET_HOLD_MAX_S");
 
-typedef enum { EVENT_KEY, EVENT_INPUT_TIMEOUT, EVENT_CODE_RESET } event_type_t;
+typedef enum { EVENT_KEY, EVENT_INPUT_TIMEOUT, EVENT_CODE_RESET, EVENT_SILENT_RESTART } event_type_t;
 
 typedef struct {
     event_type_t type;
@@ -62,6 +62,7 @@ static void post(app_event_t event)
 
 static void on_key(char key) { post((app_event_t) { .type = EVENT_KEY, .key = key }); }
 static void on_input_timeout(void) { post((app_event_t) { .type = EVENT_INPUT_TIMEOUT }); }
+static void on_silent_restart_due(void) { post((app_event_t) { .type = EVENT_SILENT_RESTART }); }  /* esp_timer task */
 
 static void on_reset_released(void *handle, void *usr_data)
 {
@@ -204,6 +205,9 @@ static void app_task(void *arg)
             ESP_LOGI(TAG, "codes reset to the factory codes");
             show_result(codes_reset());
             break;
+        case EVENT_SILENT_RESTART:
+            health_restart_for_silence();
+            break;
         }
     }
 }
@@ -254,7 +258,7 @@ void app_main(void)
     ESP_ERROR_CHECK(door_init());
     ESP_ERROR_CHECK(codes_init());
     ESP_ERROR_CHECK(registry_init());
-    ESP_ERROR_CHECK(health_init());
+    ESP_ERROR_CHECK(health_init(on_silent_restart_due));
     ESP_ERROR_CHECK(setup_channel());
     ESP_ERROR_CHECK(pairing_init());
     ESP_ERROR_CHECK(db_proto_init(on_message, accept_message, pairing_on_hello));

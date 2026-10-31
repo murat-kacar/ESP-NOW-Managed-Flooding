@@ -48,11 +48,12 @@ Why: in the first bench test the module hopped to the next channel in the middle
 waits on a channel only until the panel answers, and the panel starts the handshake only after it has answered.
 
 ### Message
-`version, opcode, apartment, channel, session, counter, ack_counter` (16 bytes) plus the 16-byte tag. Opcodes 1-4 as
+`version, opcode, apartment, channel, session, counter, request_id` (16 bytes) plus the 16-byte tag. Opcodes 1-4 as
 in SPEC 7.2, plus `PAIR_CONFIG` (5, panel to module: apartment, channel and session) and `PAIR_CONFIG_ACK` (6).
 The packed in-memory layout is the wire format, with little-endian fields; both roles run on ESP32, and the byte order
 and frame sizes are checked with `_Static_assert` in `db_proto.c`.
-An ACK carries its own counter, the counter of the acknowledged request and the request's session.
+An ACK carries its own counter, the request id of the acknowledged request and the request's session
+(ADR 0017; the field was `ack_counter`).
 
 ### Pairing session
 The panel picks a random `session` (`esp_random()`) at every pairing, stores it with the module's MAC in the registry
@@ -65,8 +66,9 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
 ### Replay counters (ADR 0002)
 - Own send counter: NVS namespace `db_ctr_own`, reserved in blocks of `DB_REPLAY_COUNTER_BLOCK`; after a reboot
   counting resumes above the reserved block. Erased by a building reset (which also replaces the key) or an NVS erase.
-- Peer counters: NVS namespace `db_ctr_peer`, one entry per MAC, written on every accepted command or ACK
-  (these are rare). Health reports are checked in RAM only (ADR 0015).
+- Peer state: NVS namespace `db_peer`, one entry per MAC (newest command counter and the request id executed
+  last), written on every accepted command (these are rare). ACKs and health reports are checked in RAM only
+  (ADR 0015, ADR 0017).
   The panel forgets a MAC's counter when it pairs that MAC with a new session. A module reset erases the peer counters
   it holds (the panel's).
 - The check runs once, in `db_proto`, for every authenticated frame before it is dispatched (as the anti-replay
@@ -78,11 +80,11 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
   rejected until it caught up. Before the replay check, `db_proto` therefore asks the application
   (`db_proto_accept_t`): registered MAC, its apartment number and current session on the panel; paired panel and
   session on the module, or the panel of the open pairing window for `PAIR_CONFIG`. An ACK is checked only when it
-  answers the request this device is waiting for (peer, session, opcode and counter).
+  answers the request this device is waiting for (peer, session, opcode and request id).
 - The body length is checked per opcode before the replay check: 0 bytes for commands and ACKs, `db_health_t` for
   `HEARTBEAT`; other lengths and unknown opcodes are dropped and counted as rejected.
-- Same counter as the last accepted one = retry: the ACK is sent again, the action is not repeated. A repeated ACK is
-  ignored.
+- Retries: each retry is a new frame with a new counter and the same request id; a command whose request id was
+  executed last is acknowledged again but not repeated (ADR 0017, which replaced "same counter = retry").
 - A message whose counter cannot be read or stored is not accepted. If the own send counter cannot be read at boot,
   `db_proto_init()` fails rather than risk reusing counters.
 

@@ -10,8 +10,17 @@
  * no report for 3 intervals is logged as missing, once per interval, until its reports resume.
  */
 
-/** @brief Start supervision; registry_init() must run first. */
-esp_err_t health_init(void);
+/**
+ * @brief Start supervision; registry_init() must run first.
+ *
+ * @param restart_due  called in the esp_timer task when no module has reported for too long
+ *                     (CONFIG_DB_RESTART_WHEN_SILENT); the application then calls health_restart_for_silence() from a
+ *                     task that may block
+ */
+esp_err_t health_init(void (*restart_due)(void));
+
+/** @brief Count the silent-network restart in NVS and restart the panel (ADR 0016). Does not return. */
+void health_restart_for_silence(void);
 
 /** @brief Erase the stored supervision state (silent-network restart count); building reset. */
 esp_err_t health_erase(void);

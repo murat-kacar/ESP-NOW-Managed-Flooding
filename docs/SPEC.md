@@ -1,7 +1,7 @@
 # ESP32 Smart Apartment Doorbell and Access Control System — Specification
 
 Version: 2026-10-29
-Sources: original project specification + `docs/adr/0001`–`0016`
+Sources: original project specification + `docs/adr/0001`–`0017`
 
 > Every decision in this document links to its ADR. Values not yet verified by measurement or test are marked **[TO VERIFY]** and listed in section 9.
 
@@ -187,7 +187,8 @@ typedef struct __attribute__((packed)) {
     uint8_t  channel;      // PAIR_CONFIG: Wi-Fi channel; otherwise 0
     uint32_t session;      // Pairing session chosen by the panel; other sessions are dropped
     uint32_t counter;      // Sender's replay counter (ADR 0002)
-    uint32_t ack_counter;  // ACKs: counter of the acknowledged request
+    uint32_t request_id;   // Commands: counter of the first attempt, same on retries;
+                           // ACKs: the request_id acknowledged; reports: 0 (ADR 0017)
 } db_msg_t;
 ```
 
@@ -202,20 +203,25 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
 (`components/db_proto`, [ADR 0012](adr/0012-protocol-and-application-logic.md)).
 
 ### 7.3. Replay protection ([ADR 0002](adr/0002-replay-protection-counter.md))
-- Every sender increments its counter by 1 for each message.
-- The receiver keeps the last accepted counter per sender and rejects any counter lower than or equal to it.
+- Every sender increments its counter by 1 for each frame, retries included.
+- The receiver keeps the newest accepted counter per sender and rejects any counter lower than or equal to it: no
+  frame is accepted twice.
+- A command's retries keep its `request_id`; the receiver executes a request id once and only acknowledges its
+  retries ([ADR 0017](adr/0017-request-ids-for-retries.md)).
+- Only a registered peer in its current session can change this state (ADR 0012).
 - Counters are stored in NVS with block reservation. Block size **[TO VERIFY]**.
 
 ### 7.3.1. Health reports ([ADR 0015](adr/0015-health-reporting.md))
 - Every paired module reports uptime, last reset reason and fault counters to the panel every
   `DB_HEARTBEAT_INTERVAL_S` (default 3600 s, +/-10 % jitter); the panel logs each report.
 - The panel logs a registered module that sends no report for 3 intervals as missing.
-- Reports are checked against the newest counter in RAM only; commands keep the NVS check.
+- Reports and ACKs are checked against the newest counter in RAM only; commands keep their state in NVS.
 
 ### 7.4. Application ACKs and retries
 - The panel sends `RING` and waits for `RING_ACK`; if none arrives it sends 2 more times.
 - The apartment module sends `OPEN_DOOR` and waits for `OPEN_DOOR_ACK`; if none arrives it sends 1 more time.
-- Retries reuse the same counter; the receiver does not repeat the action, it only resends the ACK.
+- Each retry is a new frame with a new counter and the same `request_id`; the receiver does not repeat the action,
+  it only resends the ACK (ADR 0017).
 - ACK timeout **[TO VERIFY]**. The 400 ms of the original specification contradicted its own one-way latency figure (250–300 ms).
 
 ### 7.5. Channel ([ADR 0006](adr/0006-channel-selection.md))

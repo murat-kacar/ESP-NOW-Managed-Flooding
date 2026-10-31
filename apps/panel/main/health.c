@@ -55,6 +55,8 @@ static int64_t s_any_heard_us;               /* last report of any module, or th
 #define MAX_BACKOFF   4             /* the silence limit doubles with each restart in a row, up to 16 times */
 
 static uint8_t s_silent_restarts;
+static bool s_restart_requested;
+static void (*s_restart_due)(void);
 
 /*
  * No module reported for the silence limit: the panel's own radio path is the likely fault, so restart (ADR 0016).
@@ -68,14 +70,14 @@ static void restart_if_silent(int64_t now, int registered)
     const uint8_t restarts = s_silent_restarts;
     xSemaphoreGive(s_lock);
     const int64_t limit_us = (int64_t)MISSED_LIMIT * INTERVAL_US << (restarts < MAX_BACKOFF ? restarts : MAX_BACKOFF);
-    if (registered == 0 || silent_us <= limit_us) {
+    if (registered == 0 || silent_us <= limit_us || s_restart_requested) {
         return;
     }
     ESP_LOGE(TAG, "no module reported for %" PRId64 " s: restarting the panel (%u in a row)", silent_us / 1000000,
              restarts + 1);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(db_nvs_set_u8(NVS_NAMESPACE, KEY_RESTARTS,
-                                                restarts < MAX_BACKOFF ? restarts + 1 : MAX_BACKOFF));
-    esp_restart();
+    /* The flash write and the restart run in the application task: esp_timer callbacks must not block. */
+    s_restart_requested = true;
+    s_restart_due();
 }
 
 static void load_silent_restarts(void)
@@ -130,9 +132,14 @@ static void check_cb(void *arg)
 }
 #endif
 
-esp_err_t health_init(void)
+esp_err_t health_init(void (*restart_due)(void))
 {
+    (void)restart_due;  /* used only with CONFIG_DB_RESTART_WHEN_SILENT */
 #if CONFIG_DB_HEARTBEAT
+    ESP_RETURN_ON_FALSE(restart_due != NULL, ESP_ERR_INVALID_ARG, TAG, "callback is required");
+#if CONFIG_DB_RESTART_WHEN_SILENT
+    s_restart_due = restart_due;
+#endif
     s_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_lock, ESP_ERR_NO_MEM, TAG, "no memory");
     const int64_t now = esp_timer_get_time();
@@ -149,6 +156,17 @@ esp_err_t health_init(void)
     ESP_LOGI(TAG, "expecting a report from every module every %d s", CONFIG_DB_HEARTBEAT_INTERVAL_S);
 #endif
     return ESP_OK;
+}
+
+void health_restart_for_silence(void)
+{
+#if CONFIG_DB_HEARTBEAT && CONFIG_DB_RESTART_WHEN_SILENT
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const uint8_t restarts = s_silent_restarts < MAX_BACKOFF ? s_silent_restarts + 1 : MAX_BACKOFF;
+    xSemaphoreGive(s_lock);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(db_nvs_set_u8(NVS_NAMESPACE, KEY_RESTARTS, restarts));
+    esp_restart();
+#endif
 }
 
 esp_err_t health_erase(void)

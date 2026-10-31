@@ -23,7 +23,7 @@
 static const char *TAG = "db_proto";
 
 #define NS_OWN_COUNTER   "db_ctr_own"   /* this device's send counter reservation */
-#define NS_PEER_COUNTER  "db_ctr_peer"  /* last accepted command counter per peer MAC */
+#define NS_PEER          "db_peer"      /* replay and transaction state of commands, per peer MAC (ADR 0017) */
 #define KEY_RESERVED     "reserved"
 #define PEER_KEY_SIZE    13             /* 12 hex digits of the MAC and the terminator */
 #define PEER_CACHE_SIZE  256            /* newest counter seen per peer, in RAM: one panel, or up to 254 modules */
@@ -67,12 +67,18 @@ _Static_assert(SEND_TIMEOUT_MS + CONFIG_DB_ACK_TIMEOUT_MS < CONFIG_ESP_TASK_WDT_
                "one request attempt must be shorter than the task watchdog timeout");
 #endif
 
-/* Result of the replay check (ADR 0002, ADR 0015). */
+/* Result of the replay and transaction check (ADR 0002, ADR 0015, ADR 0017). */
 typedef enum {
-    REPLAY_NEW,    /* newer than every counter seen from this peer */
-    REPLAY_RETRY,  /* a command whose counter equals the last accepted one: a retry */
-    REPLAY_OLD,    /* not newer, or the new counter could not be stored: drop */
+    REPLAY_NEW,    /* newer than every counter seen from this peer; a command with a new request id */
+    REPLAY_RETRY,  /* newer counter, but a command repeating the request id executed last: reply, do not act */
+    REPLAY_OLD,    /* not newer, or the new state could not be stored: drop */
 } replay_t;
+
+/* Command state of one peer, stored in NVS so that it survives a restart. */
+typedef struct __attribute__((packed)) {
+    uint32_t counter;       /* newest accepted command counter */
+    uint32_t last_request;  /* request id of the last executed command */
+} peer_record_t;
 
 typedef struct {
     uint8_t src[DB_MAC_LEN];
@@ -90,7 +96,7 @@ typedef struct {
     uint8_t dest[DB_MAC_LEN];
     uint8_t ack_opcode;
     uint32_t session;
-    uint32_t counter;
+    uint32_t request_id;
 } pending_request_t;
 
 typedef struct {
@@ -248,10 +254,11 @@ static int expected_body_len(uint8_t opcode)
     }
 }
 
-/* Reports change no state, so their replay check stays in RAM (ADR 0015). */
-static bool is_report(uint8_t opcode)
+/* Commands ask the receiver to act; their replay and transaction state is stored in NVS (ADR 0017). ACKs and
+ * reports (HEARTBEAT) change no state, so their replay check stays in RAM (ADR 0015). */
+static bool is_command(uint8_t opcode)
 {
-    return opcode == DB_OP_HEARTBEAT;
+    return opcode == DB_OP_RING || opcode == DB_OP_OPEN_DOOR || opcode == DB_OP_PAIR_CONFIG;
 }
 
 static void peer_key(const uint8_t mac[DB_MAC_LEN], char key[PEER_KEY_SIZE])
@@ -334,36 +341,39 @@ static esp_err_t next_counter(uint32_t *out)
 }
 
 /*
- * Replay check of an authenticated frame (ADR 0002, ADR 0015). Runs in the protocol task only.
- * Commands and ACKs are checked against the counter in NVS and update it; reports are checked in RAM only.
- * Both must also be newer than the newest counter seen in RAM.
+ * Replay and transaction check of an authenticated frame (ADR 0002, ADR 0015, ADR 0017). Runs in the protocol task
+ * only. Every frame must carry a counter newer than any accepted from this peer: strictly increasing, so a frame is
+ * never accepted twice, even after a restart for commands. A command whose request id is the one executed last is a
+ * retry. Commands update their state in NVS; ACKs and reports change nothing that a replay could exploit (an old
+ * ACK names an old request id), so they are checked in RAM only.
  */
-static replay_t check_counter(const uint8_t src[DB_MAC_LEN], uint32_t counter, bool persistent)
+static replay_t check_frame(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
 {
+    const bool command = is_command(msg->opcode);
     char key[PEER_KEY_SIZE];
     peer_key(src, key);
-    uint32_t stored = 0;
-    esp_err_t err = db_nvs_get_u32(NS_PEER_COUNTER, key, &stored);
+    peer_record_t record = { 0 };
+    esp_err_t err = db_nvs_get_blob(NS_PEER, key, &record, sizeof(record));
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGE(TAG, "reading the counter of " MACSTR " failed: %s", MAC2STR(src), esp_err_to_name(err));
+        ESP_LOGE(TAG, "reading the state of " MACSTR " failed: %s", MAC2STR(src), esp_err_to_name(err));
         return REPLAY_OLD;
     }
-    if (persistent && counter == stored) {
-        return REPLAY_RETRY;
-    }
-    if (counter <= stored || counter <= seen_get(src)) {
+    if (msg->counter <= record.counter || msg->counter <= seen_get(src)) {
         return REPLAY_OLD;
     }
-    if (persistent) {
-        err = db_nvs_set_u32(NS_PEER_COUNTER, key, counter);
+    const bool retry = command && msg->request_id != 0 && msg->request_id == record.last_request;
+    if (command) {
+        record.counter = msg->counter;
+        record.last_request = msg->request_id;
+        err = db_nvs_set_blob(NS_PEER, key, &record, sizeof(record));
         if (err != ESP_OK) {
-            /* Without a stored counter the command could be replayed later, so it is not accepted. */
-            ESP_LOGE(TAG, "storing the counter of " MACSTR " failed: %s", MAC2STR(src), esp_err_to_name(err));
+            /* Without stored state the command could be replayed after a restart, so it is not accepted. */
+            ESP_LOGE(TAG, "storing the state of " MACSTR " failed: %s", MAC2STR(src), esp_err_to_name(err));
             return REPLAY_OLD;
         }
     }
-    seen_set(src, counter);
-    return REPLAY_NEW;
+    seen_set(src, msg->counter);
+    return retry ? REPLAY_RETRY : REPLAY_NEW;
 }
 
 static void count_rejected(void)
@@ -394,12 +404,12 @@ static esp_err_t on_espnow_data(uint8_t *src_addr, void *data, size_t size, wifi
     return ESP_OK;
 }
 
-/* An ACK is accepted only for the request this device is waiting for: same peer, session, opcode and counter. */
+/* An ACK is accepted only for the request this device is waiting for: same peer, session, opcode and request id. */
 static bool ack_expected(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool expected = s_pending.active && s_pending.ack_opcode == msg->opcode &&
-                    s_pending.session == msg->session && s_pending.counter == msg->ack_counter &&
+                    s_pending.session == msg->session && s_pending.request_id == msg->request_id &&
                     memcmp(s_pending.dest, src, DB_MAC_LEN) == 0;
     xSemaphoreGive(s_lock);
     return expected;
@@ -449,7 +459,7 @@ static void handle_message(const uint8_t src[DB_MAC_LEN], int rssi, const uint8_
             ESP_LOGD(TAG, "ACK for no pending request dropped");  /* e.g. a late ACK of a finished request */
             return;
         }
-        if (check_counter(src, msg.counter, true) == REPLAY_NEW) {  /* a repeated ACK carries nothing new */
+        if (check_frame(src, &msg) == REPLAY_NEW) {
             xSemaphoreGive(s_ack);
         }
         return;
@@ -459,7 +469,7 @@ static void handle_message(const uint8_t src[DB_MAC_LEN], int rssi, const uint8_
         count_rejected();
         return;
     }
-    replay_t replay = check_counter(src, msg.counter, !is_report(msg.opcode));
+    replay_t replay = check_frame(src, &msg);
     if (replay == REPLAY_OLD) {
         ESP_LOGW(TAG, "old counter %" PRIu32 " from " MACSTR " dropped", (uint32_t)msg.counter, MAC2STR(src));
         count_rejected();
@@ -522,6 +532,9 @@ esp_err_t db_proto_send_body(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, cons
     ESP_RETURN_ON_ERROR(next_counter(&counter), TAG, "counter reservation failed");
     msg->version = DB_PROTO_VERSION;
     msg->counter = counter;
+    if (is_command(msg->opcode) && msg->request_id == 0) {
+        msg->request_id = counter;  /* a command sent once: its own request */
+    }
     frame_t frame;
     ESP_RETURN_ON_ERROR(build_frame(dest, msg, body, body_len, &frame), TAG, "signing failed");
     return raw_send(dest, &frame);
@@ -546,7 +559,7 @@ esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, c
         .opcode = ack_opcode,
         .apartment = request->apartment,
         .session = request->session,
-        .ack_counter = request->counter,
+        .request_id = request->request_id,
     };
     return db_proto_send(dest, &ack);
 }
@@ -557,15 +570,17 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
     uint32_t counter = 0;  /* db_msg_t is packed: no pointers to its members */
     frame_t frame;
     esp_err_t err = next_counter(&counter);
+    const uint32_t request_id = counter;
     if (err == ESP_OK) {
         msg->version = DB_PROTO_VERSION;
         msg->counter = counter;
+        msg->request_id = request_id;
         err = build_frame(dest, msg, NULL, 0, &frame);
     }
     if (err == ESP_OK) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_pending = (pending_request_t) {
-            .active = true, .ack_opcode = ack_opcode, .session = msg->session, .counter = counter,
+            .active = true, .ack_opcode = ack_opcode, .session = msg->session, .request_id = request_id,
         };
         memcpy(s_pending.dest, dest, DB_MAC_LEN);
         xSemaphoreGive(s_lock);
@@ -576,7 +591,21 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
         int attempt = 0;
         for (; attempt <= retries && err != ESP_OK; attempt++) {
             db_wdt_feed();  /* the caller may be a supervised task; one attempt is short (checked above) */
-            esp_err_t sent = raw_send(dest, &frame);  /* same counter and tag on every attempt */
+            if (attempt > 0) {
+                /* A retry is a new frame: a new counter stays newer than any message this device sent in between
+                 * (an ACK from the protocol task, a report); the request id lets the receiver act once (ADR 0017). */
+                err = next_counter(&counter);
+                if (err == ESP_OK) {
+                    msg->counter = counter;
+                    err = build_frame(dest, msg, NULL, 0, &frame);
+                }
+                if (err != ESP_OK) {
+                    ESP_LOGW(TAG, "building the retry failed: %s", esp_err_to_name(err));
+                    break;
+                }
+                err = ESP_ERR_TIMEOUT;
+            }
+            esp_err_t sent = raw_send(dest, &frame);
             if (sent != ESP_OK) {
                 ESP_LOGW(TAG, "send failed: %s", esp_err_to_name(sent));
             }
@@ -584,8 +613,8 @@ esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opc
                 err = ESP_OK;
             }
         }
-        /* ACK timeout measurement (SPEC 9). Retries carry the same counter, so a late ACK of the first attempt also
-         * ends the wait: the time is counted from the first send. */
+        /* ACK timeout measurement (SPEC 9). Retries carry the same request id, so a late ACK of the first attempt
+         * also ends the wait: the time is counted from the first send. */
         const int elapsed_ms = (int)((esp_timer_get_time() - start_us) / 1000);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "opcode %u to " MACSTR " acknowledged after %d ms (attempt %d of %d)", msg->opcode,
@@ -614,14 +643,14 @@ esp_err_t db_proto_forget_peer(const uint8_t mac[DB_MAC_LEN])
 {
     char key[PEER_KEY_SIZE];
     peer_key(mac, key);
-    ESP_RETURN_ON_ERROR(db_nvs_erase_key(NS_PEER_COUNTER, key), TAG, "erase peer counter failed");
+    ESP_RETURN_ON_ERROR(db_nvs_erase_key(NS_PEER, key), TAG, "erase peer state failed");
     seen_clear(mac);
     return ESP_OK;
 }
 
 esp_err_t db_proto_erase_peer_counters(void)
 {
-    ESP_RETURN_ON_ERROR(db_nvs_erase_namespace(NS_PEER_COUNTER), TAG, "erase peer counters failed");
+    ESP_RETURN_ON_ERROR(db_nvs_erase_namespace(NS_PEER), TAG, "erase peer states failed");
     seen_clear(NULL);
     return ESP_OK;
 }

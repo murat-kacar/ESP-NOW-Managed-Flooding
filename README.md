@@ -9,8 +9,9 @@ OTA ([ADR 0013](docs/adr/0013-closed-system-no-ota.md)).
 | **Panel** | Building entrance, one per building | Keypad, door lock relay, buzzer; rings apartments, opens the door with a code |
 | **Apartment module** | One per apartment | Bell relay, door-open button; reports its health to the panel |
 
-Messages reach distant floors through the other modules (espressif/esp-now forwarding). Every message is
-authenticated (HMAC-SHA256) and replay-protected; pairing is done next to the panel.
+Messages reach distant floors through the other modules (espressif/esp-now forwarding). Every application message
+is authenticated (HMAC-SHA256) and replay-protected; only the channel discovery frames used during pairing are not.
+Pairing is done next to the panel.
 
 Status: development profile (no Secure Boot or Flash Encryption yet), bench and building tests in progress.
 
