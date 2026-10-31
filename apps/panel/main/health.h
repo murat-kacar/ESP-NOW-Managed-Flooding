@@ -13,6 +13,9 @@
 /** @brief Start supervision; registry_init() must run first. */
 esp_err_t health_init(void);
 
+/** @brief Erase the stored supervision state (silent-network restart count); building reset. */
+esp_err_t health_erase(void);
+
 /** @brief Log a report of a registered apartment and mark it as heard. Runs in the protocol task. */
 void health_on_report(uint8_t apartment, const db_health_t *report);
 

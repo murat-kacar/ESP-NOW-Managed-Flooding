@@ -84,10 +84,11 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
   code resets the level.
 - Codes: changed codes in NVS `db_codes`, else the factory partition `fctry` (namespace `factory`); constant-time compare.
 - Registry: NVS `db_registry`, one MAC per apartment, cached in RAM.
-- Pairing: wait for the first `PAIR_HELLO` in the window, then listen for one module cycle
-  (`3 x DB_CHANNEL_DWELL_MS`); more than one module MAC: cancelled. Then `PAIR_HELLO_ACK` and the espnow_sec handshake
-  (`espnow_sec_initiator_start` with that MAC), repeated until success or the end of the window; then `PAIR_CONFIG`
-  with up to 2 retries, then register. `DB_CHANNEL_DWELL_MS` is a shared option in `components/db_net/Kconfig`.
+- Pairing: wait for the first `PAIR_HELLO` in the window and answer it with `PAIR_HELLO_ACK` at once, so that
+  module stops hopping; then listen for one module cycle (`3 x DB_CHANNEL_DWELL_MS`) for a second module: more than
+  one module MAC: cancelled. Then the espnow_sec handshake (`espnow_sec_initiator_start` with that MAC, preceded by
+  another `PAIR_HELLO_ACK`), repeated until success or the end of the window; then `PAIR_CONFIG` with up to 2
+  retries, then register. Deleting an apartment also forgets that MAC's replay counter (SPEC 5.2). `DB_CHANNEL_DWELL_MS` is a shared option in `components/db_net/Kconfig`.
 - Channel: NVS `db_panel`; site scan at boot when missing. If the scan fails, the first candidate is used and nothing
   is stored, so the next boot scans again.
 - OPEN_DOOR is accepted only from the MAC registered for the message's apartment number, in its current session.

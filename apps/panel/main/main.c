@@ -104,10 +104,11 @@ static void ring(uint8_t apartment)
 
 static void building_reset(void)
 {
-    /* SPEC 6.3: apartment records, counters, channel and application key; codes are kept. */
+    /* SPEC 6.3: apartment records, counters, health state, channel and application key; codes are kept. */
     ESP_LOGW(TAG, "building reset");
     ESP_ERROR_CHECK_WITHOUT_ABORT(registry_erase_all());
     ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_erase_all_counters());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(health_erase());
     ESP_ERROR_CHECK_WITHOUT_ABORT(db_net_erase_key());
     ESP_ERROR_CHECK_WITHOUT_ABORT(db_nvs_erase_namespace(NVS_NAMESPACE));
     esp_restart();  /* boots without a channel and runs the site scan (SPEC 7.5) */
@@ -127,8 +128,14 @@ static void on_command(const command_t *command)
         break;
     case COMMAND_DELETE: {
         registry_entry_t entry;
-        show_result(registry_get(command->apartment, &entry) ? registry_remove(command->apartment)
-                                                             : ESP_ERR_NOT_FOUND);
+        esp_err_t err = registry_get(command->apartment, &entry) ? registry_remove(command->apartment)
+                                                                 : ESP_ERR_NOT_FOUND;
+        if (err == ESP_OK) {
+            /* SPEC 5.2: the record and that module's replay counter are deleted together. A failure here only
+             * leaves an unused NVS entry: the module is no longer registered, so its messages are dropped. */
+            ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_forget_peer(entry.mac));
+        }
+        show_result(err);
         break;
     }
     case COMMAND_SET_USER_CODE:

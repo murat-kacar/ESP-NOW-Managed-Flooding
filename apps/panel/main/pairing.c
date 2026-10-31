@@ -135,6 +135,11 @@ static esp_err_t find_and_handshake(uint8_t mac[DB_MAC_LEN])
     if (!take_supervised(s_hello_seen, deadline_us)) {
         return ESP_ERR_NOT_FOUND;
     }
+    /* Lock the first module on this channel at once, so it stops hopping while the panel listens one full module
+     * cycle for a second one (ADR 0012). Answering only after the cycle met the module's return to this channel
+     * at the exact boundary, and a few milliseconds early meant a lost HELLO_ACK and a wasted handshake. */
+    module_count(mac);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_send_hello(mac, DB_OP_PAIR_HELLO_ACK));
     delay_supervised(COLLECT_MS);
     if (module_count(mac) > 1) {
         ESP_LOGW(TAG, "more than one unpaired module answered: pairing cancelled (ADR 0007)");

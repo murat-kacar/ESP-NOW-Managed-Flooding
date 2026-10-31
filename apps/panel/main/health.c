@@ -151,6 +151,18 @@ esp_err_t health_init(void)
     return ESP_OK;
 }
 
+esp_err_t health_erase(void)
+{
+#if CONFIG_DB_HEARTBEAT && CONFIG_DB_RESTART_WHEN_SILENT
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_silent_restarts = 0;
+    xSemaphoreGive(s_lock);
+    return db_nvs_erase_namespace(NVS_NAMESPACE);
+#else
+    return ESP_OK;
+#endif
+}
+
 void health_on_report(uint8_t apartment, const db_health_t *report)
 {
 #if CONFIG_DB_HEARTBEAT

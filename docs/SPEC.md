@@ -146,7 +146,7 @@ Pairing is done **next to the panel**. The espnow_sec key exchange only works wi
 
 1. **Panel code reset:** hold the hidden button inside the panel enclosure (GPIO 19) for 10–60 s and release. Codes in normal NVS are erased; the panel falls back to the factory codes on the label. Apartment records are kept.
 2. **Indoor module reset:** hold the hidden reset button (GPIO 19) for 7–12 s and release. Apartment identity, channel, key and counter are erased from NVS; the module returns to the unpaired state.
-3. **Building reset:** `* <admin_code> * 6 * <admin_code> #` — erases all apartment records, counters, the channel and the application key. The panel restarts and runs a channel scan (section 7.5).
+3. **Building reset:** `* <admin_code> * 6 * <admin_code> #` — erases all apartment records, counters, the health supervision state, the channel and the application key. The panel restarts and runs a channel scan (section 7.5).
 
 ---
 
