@@ -136,6 +136,8 @@ seçer. **Bütün daire modülleri sıfırlanıp yeniden eşleştirilmelidir.**
 ### 6.4. Yeniden başlatma (hiçbir şey silinmez)
 - Cihaz kilitlenirse kendini en geç 30 saniye içinde yeniden başlatır; ne olduğu panelin monitöründe görünür
   ("last restart: task watchdog" gibi).
+- Panel uzun süre hiçbir modülden rapor alamazsa (varsayılan 3 saat) kendini yeniden başlatır. Durum sürerse bekleme
+  süresi her seferinde iki katına çıkar (en fazla 48 saat).
 - Elle yeniden başlatmak için kart üzerindeki **EN** butonuna basın ya da elektriğini kesip açın. Kutunun içine EN ile
   GND arasına gizli bir buton da bağlanabilir. Kayıtlar, şifreler ve eşleştirme bilgileri korunur.
 

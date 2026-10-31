@@ -249,6 +249,8 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
   busy while pairing, flasher code lengths ([ADR 0014](adr/0014-accepted-risks.md)).
 - Self-recovery ([ADR 0016](adr/0016-watchdog-supervision.md)): the task watchdog (30 s) restarts the device and
   supervises the protocol and application tasks; interrupt watchdog, panic restart and brownout detector stay on.
+  The panel restarts itself when no module has reported for 3 heartbeat intervals, with a doubling wait after each
+  restart in a row (up to 48 intervals).
 - Build and flashing GUI: `python -m tools.flasher` ([ADR 0010](adr/0010-flasher-gui.md)). Per-device factory NVS is generated at flash time; there is no per-device firmware build.
 
 ---

@@ -30,17 +30,24 @@ The ESP-IDF 6.1 defaults of both roles (from the generated `sdkconfig`):
    (for example a memory leak) is visible at the panel before it causes a failure.
 5. **Hardware restart:** the board's EN pin resets the chip. A hidden button between EN and GND inside the
    enclosure gives a restart without erasing anything. It needs no firmware.
+6. **Panel restart when the network is silent** (`DB_RESTART_WHEN_SILENT`, default on; owner's decision
+   2026-10-31): if at least one module is registered and no module has reported for 3 heartbeat intervals, the
+   panel's own radio path is the likely fault and the panel restarts itself. Against a restart loop when all modules
+   are off (a power cut on their circuit), the wait doubles with each restart in a row: 3, 6, 12, 24, then 48
+   intervals at most. The count is kept in NVS (`db_health`), written only on such a restart and when the first
+   report after it arrives. Pairing a module restarts the wait, so the first module paired long after boot does not
+   trigger it.
 
 ## Alternatives considered
 - **Scheduled restart** (for example every night, "software rejuvenation"): treats the symptom and hides the cause.
   The heap figures show whether it is ever needed.
-- **Restart the panel when no module reports:** a power cut in the building would make the panel restart over and
-  over. Not added without field data.
 - **External watchdog IC:** independent of the chip and the most robust option, but more than this product needs.
 - **Network-wide restart command:** rejected in ADR 0015.
 
 ## Consequences
 - A blocked or busy protocol task or application task restarts the device within 30 s.
+- A panel that hears no module restarts after 3 intervals (3 h with the default 3600 s heartbeat), then with
+  growing waits up to 48 intervals.
 - Short-lived tasks (the module's pairing discovery task) and the tasks of ESP-IDF and the managed components are not
   supervised by this project; the idle-task check still covers CPU starvation by any task.
 - Bench test: a supervised task forced into an endless wait must restart the device, and the panel must log the

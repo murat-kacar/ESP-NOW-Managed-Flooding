@@ -161,6 +161,11 @@ sonrasında hep 600 saniyede kalır. Doğru şifre seviyeyi sıfırlar.
 | Ayar | Varsayılan | Ne işe yarar |
 | :--- | :--- | :--- |
 | RING retries without ACK | 2 | Cevap gelmezse zilin kaç kez daha gönderileceği. 2 ise toplam 3 gönderim yapılır. |
+| Restart the panel when no module reports | Açık | En az bir daire kayıtlıyken hiçbir modülden 3 heartbeat aralığı boyunca rapor gelmezse panel kendini yeniden başlatır. Heartbeat kapalıysa bu ayar görünmez. |
+
+**Sessizlikte yeniden başlatma örneği:** Heartbeat 3600 s ise hiçbir modülden 3 saat rapor gelmezse panel yeniden
+başlar. Sonra yine rapor gelmezse bekleme her seferinde iki katına çıkar: 6, 12, 24 ve en fazla 48 saat. Böylece
+modüllerin elektriği kesikken panel sürekli yeniden başlamaz. İlk rapor geldiğinde sayaç sıfırlanır.
 
 ---
 

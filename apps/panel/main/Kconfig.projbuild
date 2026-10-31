@@ -164,4 +164,14 @@ menu "Doorbell panel"
         help
             SPEC 7.4.
 
+    config DB_RESTART_WHEN_SILENT
+        bool "Restart the panel when no module reports"
+        depends on DB_HEARTBEAT
+        default y
+        help
+            If at least one module is registered and none has reported for 3 heartbeat intervals, the panel
+            restarts itself: its own radio path is then the likely fault (ADR 0016). Each restart in a row doubles
+            the wait (3, 6, 12, 24, then 48 intervals), so modules that are all switched off do not keep the panel
+            restarting; any report resets it.
+
 endmenu
