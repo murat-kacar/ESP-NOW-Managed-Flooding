@@ -69,6 +69,23 @@ menu "Doorbell network"
             The counter is persisted once per block of messages to limit flash wear (ADR 0002).
             To be set from usage data; proposed value, not verified (SPEC 9).
 
+    config DB_HEARTBEAT
+        bool "Module health reports (heartbeat)"
+        default y
+        help
+            Each paired module reports its uptime, last reset reason and fault counters to the panel, and the panel
+            logs a module that stays silent for 3 intervals (ADR 0015). Set the same value on both roles.
+
+    config DB_HEARTBEAT_INTERVAL_S
+        int "Heartbeat interval (s)"
+        depends on DB_HEARTBEAT
+        range 10 86400
+        default 3600
+        help
+            Time between two reports of one module, with +/-10 % random jitter. Report traffic grows with the
+            square of the module count (ADR 0015): about 27 frames/s for 99 modules at 3600 s. Use short intervals,
+            for example 30 s, only for bench tests with a few modules. Set the same value on both roles.
+
     menu "Wi-Fi channel"
         comment "Candidate channels for the installation site scan (ADR 0006)."
 

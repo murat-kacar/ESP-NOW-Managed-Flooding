@@ -166,6 +166,10 @@ seçer. **Bütün daire modülleri sıfırlanıp yeniden eşleştirilmelidir.**
 
 ## 8. Sorun giderme
 
+Panelin seri monitörü tüm daireleri tek yerden gösterir: her modül belirli aralıklarla panele bir durum raporu
+gönderir (çalışma süresi, son yeniden başlama nedeni, cevapsız kapı açma istekleri, reddedilen mesajlar, sinyal gücü).
+Bir modülden uzun süre rapor gelmezse panel bunu uyarı olarak yazar (bkz. Yapılandırma Ayarları, heartbeat).
+
 | Belirti | Olası neden | Ne yapmalı |
 | :--- | :--- | :--- |
 | Zil çalınca panel 3 saniye orta hızda yanıp sönüyor | Modülün elektriği yok veya sinyal ulaşmıyor | Modülün enerjisini kontrol edin; aradaki dairelerin modüllerinin açık olduğundan emin olun |

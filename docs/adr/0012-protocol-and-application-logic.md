@@ -65,7 +65,8 @@ session is invalid, so the panel can forget that MAC's counter at pairing (`db_p
 ### Replay counters (ADR 0002)
 - Own send counter: NVS namespace `db_ctr_own`, reserved in blocks of `DB_REPLAY_COUNTER_BLOCK`; after a reboot
   counting resumes above the reserved block. Erased by a building reset (which also replaces the key) or an NVS erase.
-- Peer counters: NVS namespace `db_ctr_peer`, one entry per MAC, written on every accepted message (messages are rare).
+- Peer counters: NVS namespace `db_ctr_peer`, one entry per MAC, written on every accepted command or ACK
+  (these are rare). Health reports are checked in RAM only (ADR 0015).
   The panel forgets a MAC's counter when it pairs that MAC with a new session. A module reset erases the peer counters
   it holds (the panel's).
 - The check runs once, in `db_proto`, for every authenticated frame before it is dispatched (as the anti-replay

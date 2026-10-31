@@ -13,6 +13,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "health.h"
 #include "input.h"
 #include "iot_button.h"
 #include "keypad.h"
@@ -142,19 +143,35 @@ static void on_command(const command_t *command)
 }
 
 /* Runs in the db_proto task, after authentication and the replay check. */
-static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool retry)
+static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const uint8_t *body, size_t body_len,
+                       bool retry)
 {
     uint8_t apartment;
     registry_entry_t entry;
-    if (msg->opcode != DB_OP_OPEN_DOOR || !registry_find(src, &apartment, &entry) || apartment != msg->apartment ||
-            msg->session != entry.session) {
+    if (!registry_find(src, &apartment, &entry) || apartment != msg->apartment || msg->session != entry.session) {
         return;  /* only registered modules, for their own apartment number, in the current session */
     }
-    if (!retry) {  /* a retry is acknowledged again, the door is not opened twice */
-        ESP_LOGI(TAG, "door-open request from apartment %u", apartment);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(door_open());
+    switch (msg->opcode) {
+    case DB_OP_OPEN_DOOR:
+        if (!retry) {  /* a retry is acknowledged again, the door is not opened twice */
+            ESP_LOGI(TAG, "door-open request from apartment %u", apartment);
+            ESP_ERROR_CHECK_WITHOUT_ABORT(door_open());
+        }
+        ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_OPEN_DOOR_ACK, msg));
+        break;
+    case DB_OP_HEARTBEAT: {
+        db_health_t report;  /* copied: the body has no alignment guarantee */
+        if (body_len != sizeof(report)) {
+            ESP_LOGW(TAG, "apartment %u: report of %u bytes ignored", apartment, (unsigned)body_len);
+            break;
+        }
+        memcpy(&report, body, sizeof(report));
+        health_on_report(apartment, &report);
+        break;
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_OPEN_DOOR_ACK, msg));
+    default:
+        break;
+    }
 }
 
 static void app_task(void *arg)
@@ -225,6 +242,7 @@ void app_main(void)
     ESP_ERROR_CHECK(door_init());
     ESP_ERROR_CHECK(codes_init());
     ESP_ERROR_CHECK(registry_init());
+    ESP_ERROR_CHECK(health_init());
     ESP_ERROR_CHECK(setup_channel());
     ESP_ERROR_CHECK(pairing_init());
     ESP_ERROR_CHECK(db_proto_init(on_message, pairing_on_hello));

@@ -12,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "heartbeat.h"
 #include "identity.h"
 #include "pairing.h"
 
@@ -21,7 +22,7 @@ static const char *TAG = "apartment";
 #define APP_TASK_STACK   4096
 #define APP_TASK_PRIO    4
 
-typedef enum { EVENT_DOOR_OPEN, EVENT_PAIRING, EVENT_RESET } app_event_t;
+typedef enum { EVENT_DOOR_OPEN, EVENT_PAIRING, EVENT_RESET, EVENT_HEARTBEAT } app_event_t;
 
 static QueueHandle_t s_events;
 static SemaphoreHandle_t s_identity_lock;
@@ -38,6 +39,7 @@ static void post_event(app_event_t event)
 static void on_door_open(void) { post_event(EVENT_DOOR_OPEN); }
 static void on_pairing(void) { post_event(EVENT_PAIRING); }
 static void on_reset(void) { post_event(EVENT_RESET); }
+static void on_heartbeat_due(void) { post_event(EVENT_HEARTBEAT); }  /* esp_timer task */
 
 static bool get_identity(identity_t *out)
 {
@@ -84,11 +86,15 @@ static void handle_pair_config(const uint8_t src[DB_MAC_LEN], const db_msg_t *ms
     db_status_led_start(DB_LED_PAIRED_IDLE);
     db_status_led_start(DB_LED_SUCCESS);
     ESP_ERROR_CHECK_WITHOUT_ABORT(bell_ring());
+    heartbeat_start();
 }
 
 /* Runs in the db_proto task, after authentication and the replay check. */
-static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool retry)
+static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const uint8_t *body, size_t body_len,
+                       bool retry)
 {
+    (void)body;  /* no message to the module carries a body */
+    (void)body_len;
     if (msg->opcode == DB_OP_PAIR_CONFIG) {
         handle_pair_config(src, msg, retry);
         return;
@@ -102,6 +108,7 @@ static void on_message(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool 
     }
     if (!retry) {  /* a retry is acknowledged again, the bell does not ring twice */
         ESP_LOGI(TAG, "ring");
+        heartbeat_count_ring();
         ESP_ERROR_CHECK_WITHOUT_ABORT(bell_ring());
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(db_proto_ack(src, DB_OP_RING_ACK, msg));
@@ -116,7 +123,16 @@ static void request_door_open(void)
     }
     db_msg_t msg = { .opcode = DB_OP_OPEN_DOOR, .apartment = identity.apartment, .session = identity.session };
     esp_err_t err = db_proto_request(identity.panel_mac, &msg, DB_OP_OPEN_DOOR_ACK, CONFIG_DB_OPEN_DOOR_RETRIES);
+    heartbeat_count_door_request(err == ESP_OK);
     ESP_LOGI(TAG, "door-open request: %s", err == ESP_OK ? "acknowledged" : esp_err_to_name(err));
+}
+
+static void send_heartbeat(void)
+{
+    identity_t identity;
+    if (get_identity(&identity)) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(heartbeat_send(&identity));
+    }
 }
 
 static void start_pairing(void)
@@ -159,6 +175,9 @@ static void app_task(void *arg)
         case EVENT_RESET:
             factory_reset();
             break;
+        case EVENT_HEARTBEAT:
+            send_heartbeat();
+            break;
         }
     }
 }
@@ -195,6 +214,7 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(pairing_init());
+    ESP_ERROR_CHECK(heartbeat_init(on_heartbeat_due));
     ESP_ERROR_CHECK(db_proto_init(on_message, pairing_on_hello));
     ESP_ERROR_CHECK(xTaskCreate(app_task, "apartment", APP_TASK_STACK, NULL, APP_TASK_PRIO, NULL) == pdPASS
                     ? ESP_OK : ESP_ERR_NO_MEM);
@@ -205,5 +225,8 @@ void app_main(void)
         .reset = on_reset,
     };
     ESP_ERROR_CHECK(buttons_init(&handlers));
+    if (s_paired) {
+        heartbeat_start();
+    }
     ESP_LOGI(TAG, "started");
 }

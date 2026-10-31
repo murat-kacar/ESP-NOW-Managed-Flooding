@@ -15,6 +15,7 @@
 #include "espnow_security_handshake.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "health.h"
 #include "registry.h"
 
 static const char *TAG = "pairing";
@@ -162,6 +163,7 @@ esp_err_t pairing_run(uint8_t apartment)
     ESP_RETURN_ON_ERROR(db_proto_request(entry.mac, &config, DB_OP_PAIR_CONFIG_ACK, CONFIG_RETRIES), TAG,
                         "configuration message not acknowledged");
     ESP_RETURN_ON_ERROR(registry_add(apartment, &entry), TAG, "registering failed");
+    health_on_paired(apartment);
     ESP_LOGI(TAG, "apartment %u paired", apartment);
     return ESP_OK;
 }

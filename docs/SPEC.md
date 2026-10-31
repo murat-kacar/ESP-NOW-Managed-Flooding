@@ -1,7 +1,7 @@
 # ESP32 Smart Apartment Doorbell and Access Control System — Specification
 
 Version: 2026-10-29
-Sources: original project specification + `docs/adr/0001`–`0014`
+Sources: original project specification + `docs/adr/0001`–`0015`
 
 > Every decision in this document links to its ADR. Values not yet verified by measurement or test are marked **[TO VERIFY]** and listed in section 9.
 
@@ -172,6 +172,7 @@ typedef enum {
     DB_OP_PAIR_CONFIG_ACK = 6,  // Apartment -> Panel
     DB_OP_PAIR_HELLO      = 7,  // Unpaired module broadcast; plaintext, single hop, 2 bytes
     DB_OP_PAIR_HELLO_ACK  = 8,  // Panel -> module; plaintext, single hop, 2 bytes
+    DB_OP_HEARTBEAT       = 9,  // Apartment -> Panel, periodic health report (ADR 0015); no ACK
 } db_opcode_t;
 
 typedef struct __attribute__((packed)) {
@@ -187,9 +188,10 @@ typedef struct __attribute__((packed)) {
 
 Multi-byte fields are little-endian; the packed structure is sent as is.
 
-Every message is followed by a 16-byte HMAC-SHA256 tag over source MAC, destination MAC and message, with a key
-derived from the application key (32-byte frame). esp-now also delivers unencrypted frames to the application, so
-frames without a valid tag are dropped. HELLO frames carry no tag and are only used to find the channel.
+Every message is followed by an opcode-specific body of 0 to 32 bytes (only `HEARTBEAT` has one: `db_health_t`,
+22 bytes) and a 16-byte HMAC-SHA256 tag over source MAC, destination MAC, message and body, with a key derived from
+the application key (32 to 64-byte frame). esp-now also delivers unencrypted frames to the application, so frames
+without a valid tag are dropped. HELLO frames carry no tag and are only used to find the channel.
 
 The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apartment number and channel
 (`components/db_proto`, [ADR 0012](adr/0012-protocol-and-application-logic.md)).
@@ -198,6 +200,12 @@ The key exchange is the espnow_sec handshake; `PAIR_CONFIG` then carries the apa
 - Every sender increments its counter by 1 for each message.
 - The receiver keeps the last accepted counter per sender and rejects any counter lower than or equal to it.
 - Counters are stored in NVS with block reservation. Block size **[TO VERIFY]**.
+
+### 7.3.1. Health reports ([ADR 0015](adr/0015-health-reporting.md))
+- Every paired module reports uptime, last reset reason and fault counters to the panel every
+  `DB_HEARTBEAT_INTERVAL_S` (default 3600 s, +/-10 % jitter); the panel logs each report.
+- The panel logs a registered module that sends no report for 3 intervals as missing.
+- Reports are checked against the newest counter in RAM only; commands keep the NVS check.
 
 ### 7.4. Application ACKs and retries
 - The panel sends `RING` and waits for `RING_ACK`; if none arrives it sends 2 more times.

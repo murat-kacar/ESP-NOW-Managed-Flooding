@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -12,6 +13,7 @@ extern "C" {
 #define DB_PROTO_VERSION 1
 #define DB_MAC_LEN       6   /**< equals ESPNOW_ADDR_LEN (checked in db_proto.c) */
 #define DB_TAG_LEN       16  /**< truncated HMAC-SHA256 authentication tag */
+#define DB_BODY_MAX      32  /**< largest opcode-specific body after the message (ADR 0015) */
 
 /** Application message opcodes (SPEC 7.2). */
 typedef enum {
@@ -23,15 +25,16 @@ typedef enum {
     DB_OP_PAIR_CONFIG_ACK = 6,  /**< Apartment -> panel */
     DB_OP_PAIR_HELLO = 7,       /**< Unauthenticated discovery, unpaired module -> broadcast, single hop */
     DB_OP_PAIR_HELLO_ACK = 8,   /**< Unauthenticated discovery, panel in its pairing window -> module, single hop */
+    DB_OP_HEARTBEAT = 9,        /**< Apartment -> panel, periodic health report with a db_health_t body; no ACK */
 } db_opcode_t;
 
 /**
  * Application message, sent as is: multi-byte fields are little-endian (both roles run on ESP32; checked at
- * build time in db_proto.c). On air it is followed by a DB_TAG_LEN tag:
- * HMAC-SHA256(K_auth, src MAC || dest MAC || message), truncated, where K_auth = HKDF-Expand(app key,
- * "doorbell message auth", 32) (RFC 5869; Extract is skipped because the app key is uniformly random).
- * esp-now hands plaintext and decrypted frames to the application in the same way, so authenticity is checked
- * here and does not depend on the transport encryption.
+ * build time in db_proto.c). On air it is followed by an opcode-specific body of 0 to DB_BODY_MAX bytes and a
+ * DB_TAG_LEN tag: HMAC-SHA256(K_auth, src MAC || dest MAC || message || body), truncated, where
+ * K_auth = HKDF-Expand(app key, "doorbell message auth", 32) (RFC 5869; Extract is skipped because the app key is
+ * uniformly random). esp-now hands plaintext and decrypted frames to the application in the same way, so
+ * authenticity is checked here and does not depend on the transport encryption.
  */
 typedef struct __attribute__((packed)) {
     uint8_t version;       /**< DB_PROTO_VERSION */
@@ -43,14 +46,33 @@ typedef struct __attribute__((packed)) {
     uint32_t ack_counter;  /**< ACK opcodes: counter of the acknowledged request; otherwise 0 */
 } db_msg_t;
 
+/** Body of DB_OP_HEARTBEAT (ADR 0015). Counters count since the module's last restart. */
+typedef struct __attribute__((packed)) {
+    uint32_t uptime_s;             /**< Seconds since the last restart */
+    uint32_t rings;                /**< RING messages received (retries not counted) */
+    uint32_t door_requests;        /**< OPEN_DOOR requests sent */
+    uint32_t door_unacknowledged;  /**< OPEN_DOOR requests that got no ACK after all attempts */
+    uint32_t frames_rejected;      /**< Frames dropped by db_proto: invalid tag, other version or old counter */
+    uint8_t reset_reason;          /**< esp_reset_reason_t of the last restart */
+    int8_t last_rssi;              /**< RSSI of the last authentic frame received (last hop); 0 before the first */
+} db_health_t;
+
+/** Receive statistics of this device, since its last restart. */
+typedef struct {
+    uint32_t frames_rejected;  /**< invalid tag, other version or old counter */
+    int8_t last_rssi;          /**< RSSI of the last authentic frame received (last hop); 0 before the first */
+} db_proto_stats_t;
+
 /**
  * @brief Called in the protocol task for every authenticated non-ACK message that passed the replay check
- * (ADR 0002): its counter is higher than, or equal to, the last one accepted from that sender.
+ * (ADR 0002, ADR 0015).
  *
- * @param retry  true when the counter equals the last accepted one: a retry of a message already delivered.
- *               Reply again, do not repeat the action (SPEC 7.4).
+ * @param body      opcode-specific body (NULL when body_len is 0); the handler checks its length
+ * @param retry     true when the counter equals the last accepted one: a retry of a command already delivered.
+ *                  Reply again, do not repeat the action (SPEC 7.4). Always false for reports.
  */
-typedef void (*db_proto_handler_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, bool retry);
+typedef void (*db_proto_handler_t)(const uint8_t src[DB_MAC_LEN], const db_msg_t *msg, const uint8_t *body,
+                                   size_t body_len, bool retry);
 
 /**
  * @brief Called in the protocol task for an unauthenticated pairing discovery frame (DB_OP_PAIR_HELLO or
@@ -76,6 +98,9 @@ esp_err_t db_proto_send_hello(const uint8_t dest[DB_MAC_LEN], db_opcode_t opcode
  */
 esp_err_t db_proto_send(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg);
 
+/** @brief db_proto_send() with an opcode-specific body of up to DB_BODY_MAX bytes. */
+esp_err_t db_proto_send_body(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, const void *body, size_t body_len);
+
 /** @brief Send an ACK opcode for a received request (same apartment and session). */
 esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, const db_msg_t *request);
 
@@ -86,6 +111,9 @@ esp_err_t db_proto_ack(const uint8_t dest[DB_MAC_LEN], db_opcode_t ack_opcode, c
  *         Call from a task that may block; one request at a time per device.
  */
 esp_err_t db_proto_request(const uint8_t dest[DB_MAC_LEN], db_msg_t *msg, db_opcode_t ack_opcode, int retries);
+
+/** @brief Copy this device's receive statistics. */
+void db_proto_get_stats(db_proto_stats_t *out);
 
 /**
  * @brief Forget one peer's counter. Only safe together with a new session: messages captured in the old

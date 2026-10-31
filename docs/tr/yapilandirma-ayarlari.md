@@ -46,6 +46,8 @@ yüzden kapalı kalması önerilir.
 | Application ACK timeout | 400 ms | Zil veya kapı açma komutu gönderildikten sonra "aldım" cevabının (ACK) her denemede ne kadar bekleneceği. Ölçülecek. |
 | Pairing window | 20 s | Panelin ve modülün eşleştirme modunda kaldığı süre. |
 | Replay counter NVS block size | 100 | Mesaj sayacının flash'a kaç mesajda bir yazıldığı. |
+| Module health reports (heartbeat) | Açık | Her modül belirli aralıklarla panele durum raporu gönderir; panel her raporu loglar. |
+| Heartbeat interval | 3600 s | İki rapor arasındaki süre (±%10 rastgele sapma ile). |
 
 **ACK örneği:** 400 ms ve zil tekrarı 2 ise panel, "cevap vermiyor" göstermeden önce en fazla 3 × 400 ms = 1,2
 saniye bekler. Süre çok kısa olursa geç gelen cevaplar boşuna tekrar gönderime yol açar; çok uzun olursa ulaşılamayan
@@ -53,6 +55,16 @@ dairenin hata göstermesi gecikir. Monitördeki `acknowledged after ... ms` sat�
 
 **Sayaç bloğu örneği:** 100 ise cihaz her 100 mesajda bir flash'a yazar. Yeniden başladığında sayaç en fazla 100
 ileri atlar; bu bir sorun değildir. Küçük değer daha sık flash yazımı demektir.
+
+**Heartbeat (durum raporu):** Rapor; modülün ne kadar süredir açık olduğunu, son yeniden başlama nedenini (elektrik
+kesintisi, brownout, watchdog …), aldığı zil sayısını, cevapsız kalan kapı açma isteklerini, reddettiği mesajları ve
+panelden gelen son sinyalin gücünü (RSSI) içerir. Panelin monitöründe her daire için bir satır görünür; hata varsa
+satır uyarı olarak çıkar. Bir modülden 3 aralık boyunca rapor gelmezse panel "no report" uyarısı yazar.
+- **Aralık örneği:** 30 s ise 4. kattaki modülün durumu yarım dakikada bir panele gelir; susarsa 90 saniye sonra
+  uyarı çıkar. Bu kısa aralık **sadece birkaç modülle yapılan testler** içindir: rapor her modül tarafından aktarıldığı
+  için trafik modül sayısının karesiyle artar. 99 modüllü bir binada 3600 s yaklaşık 27 paket/saniye demektir, 30 s ise
+  kanalın taşıyamayacağı kadar trafik üretir.
+- Panelde ve modüllerde aynı ayarlanmalıdır.
 
 ### 1.3. Wi-Fi channel
 
