@@ -1,0 +1,45 @@
+# Build both firmware roles on every push (ADR 0018). The build runs in Espressif's ESP-IDF Docker image of the
+# same version as the local installation, with the same script the flasher GUI uses (tools/build.py).
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.role }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [panel, apartment]
+    steps:
+      # Third-party actions are pinned to a commit SHA (GitHub security hardening guide); the tag is in the comment.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Build with ESP-IDF v6.1
+        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
+        with:
+          esp_idf_version: v6.1
+          target: esp32
+          command: python tools/build.py ${{ matrix.role }}
+
+      - name: Upload the merged image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ${{ matrix.role }}-image
+          path: builds/${{ matrix.role }}_*.bin
+          if-no-files-found: error
+          retention-days: 14

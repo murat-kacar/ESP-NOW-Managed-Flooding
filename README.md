@@ -43,6 +43,11 @@ Without the GUI, from an ESP-IDF shell:
 python tools/build.py panel
 ```
 
+## Continuous integration
+Every push to `main` builds both roles on GitHub Actions in the `espressif/idf:v6.1` Docker image with
+`tools/build.py` (`.github/workflows/build.yml`, [ADR 0018](docs/adr/0018-continuous-integration.md)). The merged
+images are attached to each run as artifacts.
+
 ## Documentation
 - [SPEC.md](docs/SPEC.md): behaviour, protocol, LED states, items still to verify
 - [ADRs](docs/adr/): why each design decision was made
