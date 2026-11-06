@@ -26,11 +26,14 @@ menu "Doorbell network"
     config DB_FORWARD_RSSI
         int "Forward RSSI threshold (dBm)"
         range -70 -30
-        default -55
+        default -70
         help
-            Packets received weaker than this are not forwarded (frame_head.forward_rssi).
-            Default and range from esp-now ESPNOW_CONTROL_FORWARD_RSSI.
-            Not verified by field measurement yet (SPEC 9).
+            Packets received weaker than this are not forwarded (frame_head.forward_rssi). Range from esp-now
+            ESPNOW_CONTROL_FORWARD_RSSI. Default -70, the lowest value of the range, instead of the esp-now default
+            -55: the range in the building test was too low at -55 (2026-11-06), and a module that receives a
+            message more weakly than the threshold does not pass it on. Not yet confirmed as the cause. Every module
+            still forwards a message at most once (esp-now magic cache). To be set from the building's measured
+            RSSI (SPEC 9).
 
     config DB_RETRANSMIT_COUNT
         int "Retransmit count"

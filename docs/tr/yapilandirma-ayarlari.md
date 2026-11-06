@@ -18,7 +18,7 @@ sırasında gömülür. Bir ayarı değiştirdikten sonra firmware'i yeniden der
 | :--- | :--- | :--- |
 | Maximum TX power | 20 dBm | Yayın gücü. **10 dBm** (laboratuvar) seçeneği gerçekte 8,5 dBm verir. Düşük güç menzili kısaltır, masa üstü testte yan cihazları rahatsız etmez. |
 | Forward TTL (hops) | 10 | Bir mesajın en fazla kaç ara modül tarafından aktarılabileceği. Aralık 1–30. |
-| Forward RSSI threshold | -55 dBm | Bir modül mesajı bu değerden **güçlü** aldıysa aktarır, daha zayıf aldıysa aktarmaz (kendisi yine okur). Ölçülecek. |
+| Forward RSSI threshold | -70 dBm | Bir modül mesajı bu değerden **güçlü** aldıysa aktarır, daha zayıf aldıysa aktarmaz (kendisi yine okur). esp-now'ın varsayılanı -55'ti; o değerde bina testinde menzil düşük kaldı (neden henüz doğrulanmadı). Binada ölçülerek kesinleşecek. |
 | Retransmit count | 10 | Her mesajın her aktarmada havaya kaç kez gönderildiği. 0 girilirse 1 kabul edilir. |
 | Drop packets weaker than the forward RSSI threshold | Kapalı | Açılırsa eşikten zayıf alınan mesaj hiç işlenmez: ne okunur ne aktarılır. |
 
@@ -36,7 +36,7 @@ uzatır. Küçük bir binada 10 fazlasıyla yeterlidir.
 **Retransmit örneği:** 10 ise bir zil mesajı panelden 10 kopya halinde çıkar, her aktaran modül de 10 kopya gönderir.
 3 yapılırsa hava trafiği azalır ama kayıp riski artar.
 
-**Zayıf sinyali düşürme:** Açıksa ve eşik -55 dBm ise, mesajı -60 dBm alan bir daire modülü zili hiç duymaz. Bu
+**Zayıf sinyali düşürme:** Açıksa ve eşik -70 dBm ise, mesajı -75 dBm alan bir daire modülü zili hiç duymaz. Bu
 yüzden kapalı kalması önerilir.
 
 ### 1.2. Uygulama mesajları

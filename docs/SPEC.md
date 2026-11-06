@@ -160,7 +160,8 @@ Pairing is done **next to the panel**. The espnow_sec key exchange only works wi
 - `frame_head.security = true`
 - `frame_head.magic`: random (component default)
 - `forward_ttl` ≤ 30 (31 = unlimited). Value **[TO VERIFY]**.
-- `forward_rssi` / `filter_weak_signal`: value **[TO VERIFY]**.
+- `forward_rssi`: -70 dBm, the lowest allowed value (the range was too low at the esp-now default -55; cause not
+  yet confirmed); `filter_weak_signal`: off. Values **[TO VERIFY]** by an RSSI survey of the building.
 - `esp_wifi_set_ps(WIFI_PS_NONE)`
 - Receive handlers do not block; long work is queued and handled in a separate task (ESP-IDF ESP-NOW documentation).
 
