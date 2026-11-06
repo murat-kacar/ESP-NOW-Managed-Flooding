@@ -163,8 +163,8 @@ Pairing is done **next to the panel**. The espnow_sec key exchange only works wi
 - `forward_rssi`: no filter by default, every module forwards each new message once as in BLE Mesh managed
   flooding (optional threshold, default -70 dBm); `filter_weak_signal`: off
   ([ADR 0019](adr/0019-forwarding-and-long-range.md)). Values **[TO VERIFY]** by an RSSI survey of the building.
-- ESP-NOW rate: 1 Mbit/s (ESP-IDF default); optional Long Range at 250 or 500 kbit/s, the same on every device
-  (ADR 0019).
+- ESP-NOW rate: Long Range 250 kbit/s by default; 500 kbit/s or the ESP-IDF default 1 Mbit/s selectable. The same
+  on every device (ADR 0019).
 - `esp_wifi_set_ps(WIFI_PS_NONE)`
 - Receive handlers do not block; long work is queued and handled in a separate task (ESP-IDF ESP-NOW documentation).
 

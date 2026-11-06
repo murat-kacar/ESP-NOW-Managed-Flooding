@@ -23,7 +23,8 @@ Two settings limit the reach of the network:
   forwards when `forward_rssi <= rssi` and the RSSI is an 8-bit signed value, so every received frame qualifies.
   Each module still forwards each message once (magic cache) and only while the TTL lasts. With the filter on, the
   threshold is `DB_FORWARD_RSSI` (default -70 dBm), and `DB_FILTER_WEAK_SIGNAL` is available.
-- **Long Range made explicit** (`DB_WIFI_LONG_RANGE`, still off by default): LR is added to the protocols as in the
+- **Long Range made explicit and on by default** (`DB_WIFI_LONG_RANGE`; on by default since 2026-11-06, owner's
+  decision for the range between floors): LR is added to the protocols as in the
   ESP-IDF example, and the broadcast peer, which carries every message (esp-now adds it in `espnow_init()`), gets the
   LR rate with `esp_now_set_peer_rate_config()`: 250 kbit/s (default of `DB_WIFI_LR_RATE`, best sensitivity) or
   500 kbit/s. 802.11b/g/n stay enabled, so the panel's site scan still sees access points. The espnow_sec handshake

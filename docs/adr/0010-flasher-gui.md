@@ -38,7 +38,7 @@ Project Kconfig files: `components/db_net/Kconfig` (network, channels, regulator
 Defaults without an official or SPEC source are proposals and say so in their help text:
 forward TTL 10 (esp-now `ESPNOW_CONTROL_*`), no forward RSSI filter (optional threshold -70 dBm, ADR 0019), retransmit count 10 (esp-now `ESPNOW_FRAME_CONFIG_DEFAULT`),
 ACK timeout 400 ms (original specification), channel dwell 500 ms (wait for the panel's HELLO_ACK, ADR 0012),
-Long Range off (ESP-IDF `espnow` example);
+Long Range on at 250 kbit/s (ADR 0019);
 unverified proposals: LED dim 10 %, LED pattern timings except 1 Hz / 1 s / 2 s / 3 s, buzzer 2700 Hz,
 replay counter block 100.
 Component defaults kept as is: LED PWM 5 kHz with 13-bit resolution (espressif/led_indicator), button and keypad

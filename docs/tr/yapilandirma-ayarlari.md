@@ -89,7 +89,7 @@ satır uyarı olarak çıkar. Bir modülden 3 aralık boyunca rapor gelmezse pan
 | :--- | :--- | :--- |
 | Set a Wi-Fi country code | Kapalı | Açılırsa aşağıdaki ülke kodu uygulanır. Kapalıyken ESP-IDF'in varsayılan ülke ayarı kullanılır. |
 | Country code | (boş) | İki harfli ülke kodu, örn. `TR`. Kullanılabilecek kanalları ve en yüksek gücü belirler. Aday kanallardan biri o ülkede izinli değilse o kanal çalışmaz. |
-| Enable ESP-NOW Long Range mode | Kapalı | Espressif'in Long Range modu: alıcı hassasiyeti yaklaşık 4 dB daha iyi, teoride menzil 2–2,5 kat. Tüm mesajlar aşağıdaki LR hızında gönderilir. **Tüm cihazlarda aynı olmalı.** Katlar arası etkisi ölçülmedi. |
+| Enable ESP-NOW Long Range mode | Açık | Espressif'in Long Range modu: alıcı hassasiyeti yaklaşık 4 dB daha iyi, teoride menzil 2–2,5 kat. Tüm mesajlar aşağıdaki LR hızında gönderilir. **Tüm cihazlarda aynı olmalı.** Katlar arası etkisi ölçülmedi. |
 | Long Range rate | 250 kbit/s | Sadece LR açıkken görünür. 250 kbit/s en uzun menzili verir; 500 kbit/s havada yarı süre kalır. LR'de bir paket 1 Mbit/s'ye göre 2–4 kat uzun sürdüğü için retransmit sayısını düşürmek düşünülmeli. |
 
 ---

@@ -137,15 +137,15 @@ menu "Doorbell network"
             default ""
         config DB_WIFI_LONG_RANGE
             bool "Enable ESP-NOW Long Range mode"
-            default n
+            default y
             help
                 Espressif Long Range (LR) PHY: about 4 dB better reception sensitivity than 802.11b, in theory 2 to
                 2.5 times the distance (ESP-IDF Wi-Fi driver guide). Adds LR to the radio protocols, as the ESP-IDF
                 espnow example does, and sends every message at the LR rate below (esp_now_set_peer_rate_config on
                 the broadcast peer). 802.11b/g/n stay enabled, so the panel's site scan still sees access points.
                 Every device must use the same setting. An LR frame stays 2 to 4 times longer on air than at the
-                default 1 Mbit/s: consider a lower retransmit count with it (ADR 0019). Effect between floors to be
-                measured in the field.
+                default 1 Mbit/s: consider a lower retransmit count with it (ADR 0019). On by default (owner's
+                decision 2026-11-06, for the range between floors); effect to be measured in the field.
 
         choice DB_WIFI_LR_RATE
             prompt "Long Range rate"
