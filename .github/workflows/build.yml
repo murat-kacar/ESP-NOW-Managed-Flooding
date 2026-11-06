@@ -17,13 +17,21 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.role }}
+    name: Build ${{ matrix.role }} (${{ matrix.variant }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         role: [panel, apartment]
+        variant: [defaults, options-on]
+        include:
+          # "defaults" is the configuration the flasher builds without changes; "options-on" also compiles the
+          # optional features (Long Range, RSSI filter, country code) that the defaults leave out.
+          - variant: defaults
+            build_args: ""
+          - variant: options-on
+            build_args: "--config .github/ci/options-on.cfg"
     steps:
       # Third-party actions are pinned to a commit SHA (GitHub security hardening guide); the tag is in the comment.
       - name: Check out
@@ -34,12 +42,12 @@ jobs:
         with:
           esp_idf_version: v6.1
           target: esp32
-          command: python tools/build.py ${{ matrix.role }}
+          command: python tools/build.py ${{ matrix.role }} ${{ matrix.build_args }}
 
       - name: Upload the merged image
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: ${{ matrix.role }}-image
+          name: ${{ matrix.role }}-${{ matrix.variant }}-image
           path: builds/${{ matrix.role }}_*.bin
           if-no-files-found: error
           retention-days: 14

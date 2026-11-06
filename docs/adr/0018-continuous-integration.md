@@ -17,6 +17,8 @@ the hardware (hardware in the loop). ESP-IDF supports each of them: Espressif's 
   `espressif/idf:v6.1` image, the same ESP-IDF version as the local installation, with `tools/build.py`. The build
   therefore also runs the Kconfig usage check, and a failed check fails the build. The merged images are kept as
   workflow artifacts for 14 days.
+- Each role is built twice: with the defaults, and with `.github/ci/options-on.cfg`, which turns on the optional
+  features (Long Range, RSSI filter, country code) so that their code is compiled too.
 - Third-party actions are pinned to commit SHAs, as GitHub's security hardening guide recommends.
 - **Later, in this order:** static analysis (`idf.py clang-check`, `ruff` for the tools); host unit tests of logic
   that needs no hardware (keypad parser, replay and request-id checks, codes, lockout), which first needs that logic

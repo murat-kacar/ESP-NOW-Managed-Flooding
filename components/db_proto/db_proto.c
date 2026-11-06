@@ -120,6 +120,14 @@ static peer_seen_t s_seen[PEER_CACHE_SIZE];
 static size_t s_seen_next;                /* entry replaced next when the cache is full */
 static db_proto_stats_t s_stats;
 
+#if CONFIG_DB_FORWARD_RSSI_FILTER
+#define FORWARD_RSSI CONFIG_DB_FORWARD_RSSI
+#else
+/* No filter (ADR 0019): esp-now forwards when forward_rssi <= the received RSSI, an 8-bit signed value, so the
+ * lowest value passes every frame. */
+#define FORWARD_RSSI INT8_MIN
+#endif
+
 static const espnow_frame_head_t s_frame = {
     .channel = ESPNOW_CHANNEL_CURRENT,
 #if CONFIG_DB_FILTER_WEAK_SIGNAL
@@ -129,7 +137,7 @@ static const espnow_frame_head_t s_frame = {
     .broadcast = true,  /* only broadcast frames are forwarded (ADR 0001); dest_addr selects the receiver */
     .retransmit_count = CONFIG_DB_RETRANSMIT_COUNT,
     .forward_ttl = CONFIG_DB_FORWARD_TTL,
-    .forward_rssi = CONFIG_DB_FORWARD_RSSI,
+    .forward_rssi = FORWARD_RSSI,
 };
 
 /* Discovery happens next to the panel (ADR 0007): plaintext and not forwarded. */

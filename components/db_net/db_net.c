@@ -8,6 +8,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_now.h"
 #include "esp_random.h"
 #include "esp_wifi.h"
 #include "espnow.h"
@@ -22,6 +23,16 @@ static const char *TAG = "db_net";
 #define TX_POWER_QUARTER_DBM 40
 #else
 #define TX_POWER_QUARTER_DBM 80
+#endif
+
+#if CONFIG_DB_WIFI_LR_RATE_250K
+#define LR_RATE      WIFI_PHY_RATE_LORA_250K
+#define RATE_NAME    "Long Range 250 kbit/s"
+#elif CONFIG_DB_WIFI_LR_RATE_500K
+#define LR_RATE      WIFI_PHY_RATE_LORA_500K
+#define RATE_NAME    "Long Range 500 kbit/s"
+#else
+#define RATE_NAME    "1 Mbit/s"  /* ESP-NOW default */
 #endif
 
 /* Use the key for encryption and decryption; esp-now stores it (esp-now examples/security). */
@@ -67,14 +78,21 @@ esp_err_t db_net_init(void)
     espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
     espnow_config.sec_enable = 1;  /* esp-now examples/security */
     ESP_RETURN_ON_ERROR(espnow_init(&espnow_config), TAG, "espnow_init failed");
+#if CONFIG_DB_WIFI_LONG_RANGE
+    /* The ESP-NOW guide gives 1 Mbit/s as the default rate and esp_now_set_peer_rate_config() as the way to change
+     * it; the ESP-IDF espnow example sets only the protocol. Every message goes to the broadcast peer, which
+     * espnow_init() adds, so setting its rate makes the Long Range rate explicit (ADR 0019). */
+    esp_now_rate_config_t rate = { .phymode = WIFI_PHY_MODE_LR, .rate = LR_RATE, .ersu = false, .dcm = false };
+    ESP_RETURN_ON_ERROR(esp_now_set_peer_rate_config(ESPNOW_ADDR_BROADCAST, &rate), TAG, "set LR rate failed");
+#endif
 
     uint8_t key_info[APP_KEY_LEN];
     bool has_key = espnow_get_key(key_info) == ESP_OK;
     esp_err_t err = has_key ? install_key(key_info) : ESP_OK;
     memset(key_info, 0, sizeof(key_info));
     ESP_RETURN_ON_ERROR(err, TAG, "loading the stored key failed");
-    ESP_LOGI(TAG, "TX power %d (0.25 dBm units), application key %s", TX_POWER_QUARTER_DBM,
-             has_key ? "loaded" : "not set");
+    ESP_LOGI(TAG, "TX power %d (0.25 dBm units), %s, application key %s", TX_POWER_QUARTER_DBM,
+             RATE_NAME, has_key ? "loaded" : "not set");
     return ESP_OK;
 }
 

@@ -18,20 +18,21 @@ sırasında gömülür. Bir ayarı değiştirdikten sonra firmware'i yeniden der
 | :--- | :--- | :--- |
 | Maximum TX power | 20 dBm | Yayın gücü. **10 dBm** (laboratuvar) seçeneği gerçekte 8,5 dBm verir. Düşük güç menzili kısaltır, masa üstü testte yan cihazları rahatsız etmez. |
 | Forward TTL (hops) | 10 | Bir mesajın en fazla kaç ara modül tarafından aktarılabileceği. Aralık 1–30. |
-| Forward RSSI threshold | -70 dBm | Bir modül mesajı bu değerden **güçlü** aldıysa aktarır, daha zayıf aldıysa aktarmaz (kendisi yine okur). esp-now'ın varsayılanı -55'ti; o değerde bina testinde menzil düşük kaldı (neden henüz doğrulanmadı). Binada ölçülerek kesinleşecek. |
+| Forward only packets received above an RSSI threshold | Kapalı | Kapalıyken her modül her yeni mesajı sinyal gücüne bakmadan **bir kez** aktarır (BLE Mesh'teki gibi). Açılırsa aşağıdaki eşik kullanılır (ADR 0019). |
+| Forward RSSI threshold | -70 dBm | Sadece filtre açıkken görünür. Modül mesajı bu değerden **güçlü** aldıysa aktarır, daha zayıf aldıysa aktarmaz (kendisi yine okur). |
 | Retransmit count | 10 | Her mesajın her aktarmada havaya kaç kez gönderildiği. 0 girilirse 1 kabul edilir. |
-| Drop packets weaker than the forward RSSI threshold | Kapalı | Açılırsa eşikten zayıf alınan mesaj hiç işlenmez: ne okunur ne aktarılır. |
+| Drop packets weaker than the forward RSSI threshold | Kapalı | Sadece filtre açıkken görünür. Açılırsa eşikten zayıf alınan mesaj hiç işlenmez: ne okunur ne aktarılır. |
 
 **TTL örneği:** TTL = 6 ise mesaj panelden çıktıktan sonra en fazla 6 ara modül tarafından aktarılır. Panel ile
 hedef daire arasında 6'dan fazla aktarma gerekiyorsa mesaj ulaşmaz. Her modül aynı mesajı yalnızca **bir kez**
 aktarır (esp-now tekrar filtresi). Bu yüzden TTL'yi büyütmek trafiği artırmaz, sadece mesajın gidebileceği mesafeyi
 uzatır. Küçük bir binada 10 fazlasıyla yeterlidir.
 
-**RSSI eşiği örneği:** RSSI sıfıra yaklaştıkça sinyal güçlenir (-40 dBm, -70 dBm'den güçlüdür).
-- Eşik **-70 dBm** yapılırsa zayıf alan modüller de aktarır. Daha çok aktarıcı olur, hava trafiği artar ama uzak
-  noktalara ulaşma şansı da artar.
-- Eşik **-40 dBm** yapılırsa yalnızca mesajı çok güçlü alan modüller aktarır. Trafik azalır ama bazı daireler
-  ulaşılamaz hale gelebilir.
+**RSSI filtresi örneği:** RSSI sıfıra yaklaştıkça sinyal güçlenir (-40 dBm, -70 dBm'den güçlüdür).
+- **Filtre kapalı (varsayılan):** Her modül aktarır. Menzili asıl uzatanlar mesajı zayıf alan, yani uzaktaki
+  modüllerdir. Trafik yine sınırlıdır: her modül bir mesajı en fazla bir kez aktarır.
+- **Filtre açık, eşik -40 dBm:** Yalnızca mesajı çok güçlü alan (gönderene yakın) modüller aktarır. Trafik azalır ama
+  uzak daireler ulaşılamaz hale gelebilir. esp-now'ın kendi varsayılanı -55 dBm'dir.
 
 **Retransmit örneği:** 10 ise bir zil mesajı panelden 10 kopya halinde çıkar, her aktaran modül de 10 kopya gönderir.
 3 yapılırsa hava trafiği azalır ama kayıp riski artar.
@@ -88,7 +89,8 @@ satır uyarı olarak çıkar. Bir modülden 3 aralık boyunca rapor gelmezse pan
 | :--- | :--- | :--- |
 | Set a Wi-Fi country code | Kapalı | Açılırsa aşağıdaki ülke kodu uygulanır. Kapalıyken ESP-IDF'in varsayılan ülke ayarı kullanılır. |
 | Country code | (boş) | İki harfli ülke kodu, örn. `TR`. Kullanılabilecek kanalları ve en yüksek gücü belirler. Aday kanallardan biri o ülkede izinli değilse o kanal çalışmaz. |
-| Enable ESP-NOW Long Range mode | Kapalı | Espressif'in Long Range (512/256 kbps) modunu açar; daha uzun menzil hedeflenir. Katlar arası etkisi ölçülmedi. |
+| Enable ESP-NOW Long Range mode | Kapalı | Espressif'in Long Range modu: alıcı hassasiyeti yaklaşık 4 dB daha iyi, teoride menzil 2–2,5 kat. Tüm mesajlar aşağıdaki LR hızında gönderilir. **Tüm cihazlarda aynı olmalı.** Katlar arası etkisi ölçülmedi. |
+| Long Range rate | 250 kbit/s | Sadece LR açıkken görünür. 250 kbit/s en uzun menzili verir; 500 kbit/s havada yarı süre kalır. LR'de bir paket 1 Mbit/s'ye göre 2–4 kat uzun sürdüğü için retransmit sayısını düşürmek düşünülmeli. |
 
 ---
 

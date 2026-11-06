@@ -23,17 +23,25 @@ menu "Doorbell network"
             ESPNOW_CONTROL_FORWARD_TTL. 31 means unlimited in esp-now and is not allowed.
             Not verified by field measurement yet (SPEC 9).
 
+    config DB_FORWARD_RSSI_FILTER
+        bool "Forward only packets received above an RSSI threshold"
+        default n
+        help
+            Off: every module forwards every new message once, whatever its signal strength, as the relay nodes of
+            BLE Mesh managed flooding do; the TTL and the esp-now message cache bound the traffic (ADR 0019).
+            On: a module forwards only packets received at or above the threshold below
+            (frame_head.forward_rssi, esp-now default -55 dBm).
+
     config DB_FORWARD_RSSI
         int "Forward RSSI threshold (dBm)"
+        depends on DB_FORWARD_RSSI_FILTER
         range -70 -30
         default -70
         help
             Packets received weaker than this are not forwarded (frame_head.forward_rssi). Range from esp-now
-            ESPNOW_CONTROL_FORWARD_RSSI. Default -70, the lowest value of the range, instead of the esp-now default
-            -55: the range in the building test was too low at -55 (2026-11-06), and a module that receives a
-            message more weakly than the threshold does not pass it on. Not yet confirmed as the cause. Every module
-            still forwards a message at most once (esp-now magic cache). To be set from the building's measured
-            RSSI (SPEC 9).
+            ESPNOW_CONTROL_FORWARD_RSSI; default -70, the lowest value, instead of the esp-now default -55, at which
+            the range in the building test was too low (2026-11-06). To be set from the building's measured RSSI
+            (SPEC 9).
 
     config DB_RETRANSMIT_COUNT
         int "Retransmit count"
@@ -60,6 +68,7 @@ menu "Doorbell network"
 
     config DB_FILTER_WEAK_SIGNAL
         bool "Drop packets weaker than the forward RSSI threshold"
+        depends on DB_FORWARD_RSSI_FILTER
         default n
         help
             frame_head.filter_weak_signal. Off in esp-now ESPNOW_FRAME_CONFIG_DEFAULT.
@@ -130,8 +139,26 @@ menu "Doorbell network"
             bool "Enable ESP-NOW Long Range mode"
             default n
             help
-                PHY rate 512 kbps or 256 kbps for longer range. Default from ESP-IDF examples/wifi/espnow.
-                Effect between floors to be measured in the field.
+                Espressif Long Range (LR) PHY: about 4 dB better reception sensitivity than 802.11b, in theory 2 to
+                2.5 times the distance (ESP-IDF Wi-Fi driver guide). Adds LR to the radio protocols, as the ESP-IDF
+                espnow example does, and sends every message at the LR rate below (esp_now_set_peer_rate_config on
+                the broadcast peer). 802.11b/g/n stay enabled, so the panel's site scan still sees access points.
+                Every device must use the same setting. An LR frame stays 2 to 4 times longer on air than at the
+                default 1 Mbit/s: consider a lower retransmit count with it (ADR 0019). Effect between floors to be
+                measured in the field.
+
+        choice DB_WIFI_LR_RATE
+            prompt "Long Range rate"
+            depends on DB_WIFI_LONG_RANGE
+            default DB_WIFI_LR_RATE_250K
+            help
+                250 kbit/s has the best sensitivity; 500 kbit/s halves the time on air.
+
+            config DB_WIFI_LR_RATE_250K
+                bool "250 kbit/s (longest range)"
+            config DB_WIFI_LR_RATE_500K
+                bool "500 kbit/s"
+        endchoice
     endmenu
 
 endmenu

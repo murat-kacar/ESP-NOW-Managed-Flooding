@@ -1,7 +1,7 @@
 # ESP32 Smart Apartment Doorbell and Access Control System — Specification
 
 Version: 2026-10-29
-Sources: original project specification + `docs/adr/0001`–`0018`
+Sources: original project specification + `docs/adr/0001`–`0019`
 
 > Every decision in this document links to its ADR. Values not yet verified by measurement or test are marked **[TO VERIFY]** and listed in section 9.
 
@@ -160,8 +160,11 @@ Pairing is done **next to the panel**. The espnow_sec key exchange only works wi
 - `frame_head.security = true`
 - `frame_head.magic`: random (component default)
 - `forward_ttl` ≤ 30 (31 = unlimited). Value **[TO VERIFY]**.
-- `forward_rssi`: -70 dBm, the lowest allowed value (the range was too low at the esp-now default -55; cause not
-  yet confirmed); `filter_weak_signal`: off. Values **[TO VERIFY]** by an RSSI survey of the building.
+- `forward_rssi`: no filter by default, every module forwards each new message once as in BLE Mesh managed
+  flooding (optional threshold, default -70 dBm); `filter_weak_signal`: off
+  ([ADR 0019](adr/0019-forwarding-and-long-range.md)). Values **[TO VERIFY]** by an RSSI survey of the building.
+- ESP-NOW rate: 1 Mbit/s (ESP-IDF default); optional Long Range at 250 or 500 kbit/s, the same on every device
+  (ADR 0019).
 - `esp_wifi_set_ps(WIFI_PS_NONE)`
 - Receive handlers do not block; long work is queued and handled in a separate task (ESP-IDF ESP-NOW documentation).
 
